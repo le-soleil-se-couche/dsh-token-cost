@@ -6,6 +6,8 @@
 
 import { TOKEN_COST_API } from '../protocol.ts'
 import type {
+  ModelsResponse,
+  SavePricesResponse,
   ResyncResponse,
   SessionDetailResponse,
   SessionsResponse,
@@ -64,5 +66,19 @@ export class TokenCostApi {
   async resync(): Promise<ResyncResponse> {
     const response = await fetch(`${TOKEN_COST_API}/resync`, { method: 'POST' })
     return readJson<ResyncResponse>(response)
+  }
+
+  async models(): Promise<ModelsResponse> {
+    const response = await fetch(`${TOKEN_COST_API}/models`, { headers: { accept: 'application/json' } })
+    return readJson<ModelsResponse>(response)
+  }
+
+  async savePrices(customPrices: string): Promise<SavePricesResponse> {
+    const response = await fetch(`${TOKEN_COST_API}/prices`, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify({ customPrices }),
+    })
+    return readJson<SavePricesResponse>(response)
   }
 }

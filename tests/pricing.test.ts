@@ -5,13 +5,18 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  FX_CNY_PER_USD,
   PRICE_SCHEMES,
   SCHEME_B_EFFECTIVE_FROM,
+  convertPriceSet,
+  formatPeakWindows,
   isPeakHour,
+  modelPriceFromRates,
   normalizeModel,
   parseCustomPrices,
   priceRecord,
   resolveScheme,
+  serializeCustomPrices,
   totalsFor,
   withCustomPrices,
 } from '../src/pricing.ts'
@@ -50,16 +55,25 @@ describe('resolveScheme', () => {
 
 describe('isPeakHour', () => {
   const schemeB = PRICE_SCHEMES[1]!
-  // 2026-08-17 10:00 UTC is inside the 06-10 window (end exclusive).
-  it('window boundaries are start-inclusive, end-exclusive', () => {
-    const hour = (h: number): number => Date.UTC(2026, 7, 17, h, 0, 0)
-    expect(isPeakHour(schemeB, hour(0))).toBe(false)
-    expect(isPeakHour(schemeB, hour(1))).toBe(true)
-    expect(isPeakHour(schemeB, hour(3))).toBe(true)
-    expect(isPeakHour(schemeB, hour(4))).toBe(false)
-    expect(isPeakHour(schemeB, hour(6))).toBe(true)
-    expect(isPeakHour(schemeB, hour(9))).toBe(true)
-    expect(isPeakHour(schemeB, hour(10))).toBe(false)
+  // Official windows are Beijing 09:00-12:00 and 14:00-18:00 (end exclusive).
+  it('window boundaries are start-inclusive, end-exclusive in UTC+8', () => {
+    const utc = (h: number): number => Date.UTC(2026, 7, 17, h, 0, 0)
+    expect(isPeakHour(schemeB, utc(0))).toBe(false) // Beijing 08:00
+    expect(isPeakHour(schemeB, utc(1))).toBe(true) // Beijing 09:00
+    expect(isPeakHour(schemeB, utc(3))).toBe(true) // Beijing 11:00
+    expect(isPeakHour(schemeB, utc(4))).toBe(false) // Beijing 12:00
+    expect(isPeakHour(schemeB, utc(6))).toBe(true) // Beijing 14:00
+    expect(isPeakHour(schemeB, utc(9))).toBe(true) // Beijing 17:00
+    expect(isPeakHour(schemeB, utc(10))).toBe(false) // Beijing 18:00
+  })
+
+  it('treats 08:59 Beijing as off-peak and 09:00 as peak', () => {
+    expect(isPeakHour(schemeB, Date.UTC(2026, 7, 17, 0, 59, 0))).toBe(false)
+    expect(isPeakHour(schemeB, Date.UTC(2026, 7, 17, 1, 0, 0))).toBe(true)
+  })
+
+  it('labels windows in the UTC+8 clock', () => {
+    expect(formatPeakWindows(schemeB)).toBe('09:00-12:00、14:00-18:00')
   })
 })
 
@@ -127,6 +141,59 @@ describe('custom prices', () => {
     const schemes = withCustomPrices(PRICE_SCHEMES, custom)
     const cost = priceRecord(record({ model: 'MY-MODEL', inputTokens: 1_000_000 }), schemes, 'scheme-a')
     expect(cost!.costCny).toBeCloseTo(9, 6)
+  })
+
+  it('accepts a single currency and fills the other with the reference FX', () => {
+    const custom = parseCustomPrices('{"kimi-k2":{"cny":{"miss":7.25,"hit":0,"output":14.5}}}')
+    expect(custom['kimi-k2']!.usd.miss).toBeCloseTo(1, 6)
+    expect(custom['kimi-k2']!.usd.output).toBeCloseTo(2, 6)
+    expect(convertPriceSet({ miss: 1, hit: 0, output: 2 }, 'usd').miss).toBeCloseTo(FX_CNY_PER_USD, 6)
+  })
+
+  it('defaults third-party models to flat so scheme-b does not halve them', () => {
+    const custom = parseCustomPrices('{"gpt-4o":{"usd":{"miss":2.5,"hit":1.25,"output":10}}}')
+    expect(custom['gpt-4o']!.flat).toBe(true)
+    const schemes = withCustomPrices(PRICE_SCHEMES, custom)
+    const peak = record({
+      model: 'gpt-4o',
+      inputTokens: 0,
+      outputTokens: 1_000_000,
+      time: Date.UTC(2026, 7, 17, 2, 0, 0),
+    })
+    const offpeak = record({
+      model: 'gpt-4o',
+      inputTokens: 0,
+      outputTokens: 1_000_000,
+      time: Date.UTC(2026, 7, 17, 0, 0, 0),
+    })
+    expect(priceRecord(peak, schemes)!.costUsd).toBeCloseTo(10, 6)
+    expect(priceRecord(offpeak, schemes)!.costUsd).toBeCloseTo(10, 6)
+    expect(priceRecord(peak, schemes)!.peak).toBeNull()
+  })
+
+  it('keeps peak behaviour when overriding a built-in DeepSeek model without flat', () => {
+    const custom = parseCustomPrices('{"deepseek-v4-flash":{"cny":{"miss":3,"hit":0.1,"output":9},"usd":{"miss":0.44,"hit":0.014,"output":1.32}}}')
+    expect(custom['deepseek-v4-flash']!.flat).toBeUndefined()
+    const schemes = withCustomPrices(PRICE_SCHEMES, custom)
+    const peak = record({ inputTokens: 0, outputTokens: 1_000_000, time: Date.UTC(2026, 7, 17, 2, 0, 0) })
+    expect(priceRecord(peak, schemes)!.costCny).toBeCloseTo(9, 6)
+  })
+
+  it('round-trips through serializeCustomPrices', () => {
+    const price = modelPriceFromRates('claude-sonnet', { miss: 3, hit: 0.3, output: 15 }, 'usd')
+    const text = serializeCustomPrices({ 'claude-sonnet': price })
+    const parsed = parseCustomPrices(text)
+    expect(parsed['claude-sonnet']!.usd.output).toBe(15)
+    expect(parsed['claude-sonnet']!.flat).toBe(true)
+  })
+
+  it('lists unpriced models in totalsFor', () => {
+    const { priced, unpricedModels } = totalsFor([
+      record({ model: 'deepseek-v4-flash' }),
+      record({ model: 'gpt-4o' }),
+    ], PRICE_SCHEMES)
+    expect(priced).toBe(1)
+    expect(unpricedModels).toEqual(['gpt-4o'])
   })
 
   it('rejects malformed input', () => {

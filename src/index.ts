@@ -14,6 +14,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import z from 'schemastery'
 import { SessionLedger } from './ledger.ts'
+import { CustomPriceStore } from './price-store.ts'
 import { PRICE_SCHEMES, parseCustomPrices, withCustomPrices } from './pricing.ts'
 import type { ModelPrice, PriceScheme } from './protocol.ts'
 import { makeRoutes } from './routes.ts'
@@ -77,10 +78,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   const home = resolveDshHome()
+  const storageDir = join(home, 'storages', 'dsh-token-cost')
   const ledger = new SessionLedger(
     join(home, 'sessions'),
-    join(home, 'storages', 'dsh-token-cost', 'ledger.json'),
+    join(storageDir, 'ledger.json'),
   )
+  const priceStore = new CustomPriceStore(join(storageDir, 'custom-prices.json'))
 
   let disposeRoutes: (() => void) | undefined
   /** Rebuild the route registration to match the current settings source. */
@@ -96,18 +99,19 @@ export function apply(ctx: Context, config: Config = {}): void {
       priceMode: value.priceMode,
       currency: value.currency,
     })
-    const schemes = (): PriceScheme[] => {
-      let custom: Record<string, ModelPrice> | undefined
+    const customPrices = (): Record<string, ModelPrice> => {
+      const stored = priceStore.get()
+      if (Object.keys(stored).length > 0) return stored
       try {
-        custom = parseCustomPrices(value.customPrices)
+        return parseCustomPrices(value.customPrices)
       } catch {
-        custom = undefined
+        return {}
       }
-      return withCustomPrices(PRICE_SCHEMES, custom)
     }
+    const schemes = (): PriceScheme[] => withCustomPrices(PRICE_SCHEMES, customPrices())
     disposeRoutes = ctx.effect(
       () => {
-        const routes = makeRoutes({ ledger, pricing, schemes })
+        const routes = makeRoutes({ ledger, pricing, schemes, customPrices, priceStore })
         const disposers = routes.map((route) => ctx.webServer.register(route))
         return () => { for (const dispose of disposers) dispose() }
       },
@@ -120,4 +124,5 @@ export function apply(ctx: Context, config: Config = {}): void {
     onChange: rebuild,
   })
   rebuild()
+  void priceStore.whenReady().then(() => { rebuild() })
 }

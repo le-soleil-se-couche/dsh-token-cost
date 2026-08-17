@@ -63,6 +63,8 @@ export interface CostGroupRow {
   key: string
   label: string
   totals: CostTotals
+  /** How many records in this group had a catalog/custom price. */
+  priced: number
 }
 
 /** Per-request price entry, per display currency. */
@@ -79,7 +81,10 @@ export interface ModelPrice {
   flat?: boolean
 }
 
-/** One peak hour window in UTC hours; `start` inclusive, `end` exclusive. */
+/**
+ * One peak hour window in the scheme's local clock (`peakOffsetMinutes`).
+ * `start` inclusive, `end` exclusive, hour 0-24.
+ */
 export interface PeakWindow {
   start: number
   end: number
@@ -93,9 +98,16 @@ export interface PriceScheme {
   effectiveFrom: number
   /**
    * Peak hour windows when present: model prices are PEAK prices and off-peak
-   * billing charges half. Absent on flat schemes.
+   * billing charges half. Hours are in the clock of {@link peakOffsetMinutes}.
+   * Absent on flat schemes.
    */
   peak?: PeakWindow[]
+  /**
+   * Minutes east of UTC for peak-hour evaluation. DeepSeek official billing
+   * uses Beijing time, so scheme-b is 480 (UTC+8). Defaults to 480 when peak
+   * windows are present.
+   */
+  peakOffsetMinutes?: number
   /** Model id (normalized) -> prices. */
   models: Record<string, ModelPrice>
 }
@@ -150,9 +162,41 @@ export interface SummaryResponse {
   from: number
   to: number
   totals: CostTotals
+  /** Records that matched a built-in or custom price. */
+  priced: number
+  /** Distinct model ids in the window that still have no price. */
+  unpricedModels: string[]
   byModel: CostGroupRow[]
   bySession: CostGroupRow[]
   byDay: CostGroupRow[]
+  error?: string
+}
+
+/** Where a model id's unit price comes from. */
+export type ModelPriceSource = 'builtin' | 'custom' | 'unpriced'
+
+/** One row of GET /api/dsh-token-cost/models. */
+export interface ModelCatalogRow {
+  /** Display model id (original casing from the newest usage, else the catalog key). */
+  model: string
+  provider: string
+  records: number
+  lastSeen: number
+  source: ModelPriceSource
+  price: ModelPrice | null
+}
+
+/** GET /api/dsh-token-cost/models */
+export interface ModelsResponse {
+  ok: boolean
+  models: ModelCatalogRow[]
+  error?: string
+}
+
+/** POST /api/dsh-token-cost/prices */
+export interface SavePricesResponse {
+  ok: boolean
+  models: ModelCatalogRow[]
   error?: string
 }
 
@@ -170,6 +214,8 @@ export interface SessionDetailResponse {
   ok: boolean
   meta: SessionMeta
   totals: CostTotals
+  /** Records in this session that matched a price. */
+  priced: number
   records: UsageRecord[]
   /** Billing outcome per record, aligned by index. */
   costs: RecordCost[]

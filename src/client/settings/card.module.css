@@ -362,3 +362,98 @@
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.pricePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.priceSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.unpricedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.unpricedItem {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  font-size: 12px;
+}
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.addField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.addFieldLabel {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.3;
+}
+.addRates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: end;
+}
+.priceInput {
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.priceInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -1px;
+}
+.badgeUnpriced,
+.badgeBuiltin,
+.badgeCustom {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 18px;
+  font-weight: 600;
+}
+.badgeUnpriced {
+  color: var(--dsw-alias-state-warn-primary);
+  background: var(--dsw-alias-state-warn-bg, transparent);
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+}
+.badgeBuiltin,
+.badgeCustom {
+  color: var(--dsw-alias-label-tertiary);
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+.unpricedBanner {
+  font-size: 12px;
+  color: var(--dsw-alias-state-warn-primary);
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 6px;
+}

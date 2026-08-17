@@ -15,7 +15,7 @@
  *   deepseek-reasoner  cny miss 4 / hit 1 / out 16        usd 0.55 / 0.14 / 2.19   (legacy flat)
  *
  * Scheme B (peak/off-peak, from 2026-08-16T16:00Z = 2026-08-17 00:00 Beijing):
- *   peak hours UTC 01-04 and 06-10 (Beijing 9-12, 14-18); off-peak bills half.
+ *   peak hours Beijing 09:00-12:00 and 14:00-18:00 (UTC+8); off-peak bills half.
  *   deepseek-v4-flash  peak cny miss 3 / hit 0.10 / out 9     usd 0.44 / 0.014 / 1.32
  *   deepseek-v4-pro    peak cny miss 9 / hit 0.30 / out 27    usd 1.32 / 0.044 / 3.96
  *   legacy models keep their flat prices (not covered by the announcement).
@@ -23,14 +23,42 @@
  * Prices are per 1M tokens; cost = tokens / 1e6 * price.
  */
 
-import type { ModelPrice, PriceScheme, UsageRecord } from './protocol.ts'
+import type { ModelPrice, PriceScheme, PriceSet, UsageRecord } from './protocol.ts'
 
 /** UTC instant the peak/off-peak scheme starts billing. */
 export const SCHEME_B_EFFECTIVE_FROM = Date.UTC(2026, 7, 16, 16, 0, 0)
 
+/** Official DeepSeek peak clock: Beijing / UTC+8. */
+export const PEAK_TZ_OFFSET_MINUTES = 8 * 60
+
+/**
+ * Reference FX used only to fill the other display currency when the user
+ * types a single-currency custom price. Not a live market quote.
+ */
+export const FX_CNY_PER_USD = 7.25
+
 /** Normalize a model id for catalog lookup (case-insensitive, trimmed). */
 export function normalizeModel(model: string): string {
   return model.trim().toLowerCase()
+}
+
+/** Built-in catalog keys (scheme-a and scheme-b share the same model set). */
+export function builtinModelIds(schemes: PriceScheme[] = PRICE_SCHEMES): Set<string> {
+  const ids = new Set<string>()
+  for (const scheme of schemes) {
+    for (const id of Object.keys(scheme.models)) ids.add(id)
+  }
+  return ids
+}
+
+/** Convert a per-1M price set across the plugin's two display currencies. */
+export function convertPriceSet(set: PriceSet, from: 'cny' | 'usd'): PriceSet {
+  const factor = from === 'cny' ? 1 / FX_CNY_PER_USD : FX_CNY_PER_USD
+  return {
+    miss: set.miss * factor,
+    hit: set.hit * factor,
+    output: set.output * factor,
+  }
 }
 
 /** The built-in catalog: newest last. */
@@ -64,9 +92,10 @@ export const PRICE_SCHEMES: PriceScheme[] = [
     id: 'scheme-b',
     label: 'peak-offpeak-2026-08-17',
     effectiveFrom: SCHEME_B_EFFECTIVE_FROM,
+    peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
     peak: [
-      { start: 1, end: 4 },
-      { start: 6, end: 10 },
+      { start: 9, end: 12 },
+      { start: 14, end: 18 },
     ],
     models: {
       'deepseek-v4-flash': {
@@ -106,6 +135,46 @@ export function withCustomPrices(
   })
 }
 
+/** Read a {miss,hit,output} object; undefined when missing or malformed. */
+export function readPriceSet(value: unknown): PriceSet | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const entry = value as { miss?: unknown; hit?: unknown; output?: unknown }
+  if (typeof entry.miss !== 'number' || typeof entry.hit !== 'number' || typeof entry.output !== 'number') {
+    return undefined
+  }
+  if (!Number.isFinite(entry.miss) || !Number.isFinite(entry.hit) || !Number.isFinite(entry.output)) {
+    return undefined
+  }
+  if (entry.miss < 0 || entry.hit < 0 || entry.output < 0) return undefined
+  return { miss: entry.miss, hit: entry.hit, output: entry.output }
+}
+
+/**
+ * Third-party custom models default to flat billing so DeepSeek peak/off-peak
+ * windows do not silently halve their rates. Built-in DeepSeek overrides keep
+ * peak behaviour unless the user sets `flat: true`.
+ */
+export function defaultCustomFlat(model: string, schemes: PriceScheme[] = PRICE_SCHEMES): boolean {
+  return !builtinModelIds(schemes).has(normalizeModel(model))
+}
+
+/** Build a dual-currency ModelPrice from one currency's unit rates. */
+export function modelPriceFromRates(
+  model: string,
+  rates: PriceSet,
+  currency: 'cny' | 'usd',
+  flat?: boolean,
+): ModelPrice {
+  const cny = currency === 'cny' ? rates : convertPriceSet(rates, 'usd')
+  const usd = currency === 'usd' ? rates : convertPriceSet(rates, 'cny')
+  const resolvedFlat = flat === true || (flat !== false && defaultCustomFlat(model))
+  return {
+    cny,
+    usd,
+    ...(resolvedFlat ? { flat: true } : {}),
+  }
+}
+
 /** Parse a custom-prices JSON text; throws on invalid input. */
 export function parseCustomPrices(text: string): Record<string, ModelPrice> {
   const trimmed = text.trim()
@@ -116,23 +185,37 @@ export function parseCustomPrices(text: string): Record<string, ModelPrice> {
   }
   const out: Record<string, ModelPrice> = {}
   for (const [raw, value] of Object.entries(parsed as Record<string, unknown>)) {
-    const entry = value as Partial<ModelPrice>
-    const cny = entry.cny
-    const usd = entry.usd
-    if (
-      typeof cny?.miss !== 'number' || typeof cny.hit !== 'number' || typeof cny.output !== 'number'
-      || typeof usd?.miss !== 'number' || typeof usd.hit !== 'number' || typeof usd.output !== 'number'
-      || cny.miss < 0 || cny.hit < 0 || cny.output < 0 || usd.miss < 0 || usd.hit < 0 || usd.output < 0
-    ) {
-      throw new Error(`custom price for "${raw}" needs cny/usd { miss, hit, output } numbers`)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`custom price for "${raw}" needs cny or usd { miss, hit, output } numbers`)
     }
-    out[normalizeModel(raw)] = {
-      cny: { miss: cny.miss, hit: cny.hit, output: cny.output },
-      usd: { miss: usd.miss, hit: usd.hit, output: usd.output },
-      ...(entry.flat === true ? { flat: true } : {}),
+    const entry = value as Partial<ModelPrice> & { flat?: unknown }
+    const cny = readPriceSet(entry.cny)
+    const usd = readPriceSet(entry.usd)
+    if (cny === undefined && usd === undefined) {
+      throw new Error(`custom price for "${raw}" needs cny or usd { miss, hit, output } numbers`)
+    }
+    const id = normalizeModel(raw)
+    if (id === '') throw new Error('custom price model id must be non-empty')
+    const resolvedFlat = entry.flat === true || (entry.flat !== false && defaultCustomFlat(id))
+    out[id] = {
+      cny: cny ?? convertPriceSet(usd as PriceSet, 'usd'),
+      usd: usd ?? convertPriceSet(cny as PriceSet, 'cny'),
+      ...(resolvedFlat ? { flat: true } : {}),
     }
   }
   return out
+}
+
+/** Stable pretty-JSON for the settings field; empty catalog becomes ''. */
+export function serializeCustomPrices(custom: Record<string, ModelPrice>): string {
+  const keys = Object.keys(custom).sort()
+  if (keys.length === 0) return ''
+  const ordered: Record<string, ModelPrice> = {}
+  for (const key of keys) {
+    const price = custom[key]
+    if (price !== undefined) ordered[key] = price
+  }
+  return JSON.stringify(ordered, null, 2)
 }
 
 /**
@@ -157,14 +240,30 @@ export function resolveScheme(
   return chosen
 }
 
-/** Whether a UTC instant falls inside a scheme's peak window. */
+/** Clock hour 0-23 of an instant in a fixed UTC offset (minutes east of UTC). */
+export function hourInOffset(time: number, offsetMinutes: number): number {
+  return Math.floor((((time + offsetMinutes * 60_000) % 86_400_000) + 86_400_000) % 86_400_000 / 3_600_000)
+}
+
+/**
+ * Whether an instant falls inside a scheme's peak window.
+ * Hours are evaluated in the scheme's official clock (DeepSeek: UTC+8).
+ */
 export function isPeakHour(scheme: PriceScheme, time: number): boolean {
   if (scheme.peak === undefined || scheme.peak.length === 0) return false
-  const hour = Math.floor(((time % 86_400_000) + 86_400_000) % 86_400_000 / 3_600_000)
+  const offset = scheme.peakOffsetMinutes ?? PEAK_TZ_OFFSET_MINUTES
+  const hour = hourInOffset(time, offset)
   for (const window of scheme.peak) {
     if (window.start <= hour && hour < window.end) return true
   }
   return false
+}
+
+/** Human label for peak windows, e.g. `09:00-12:00、14:00-18:00`. */
+export function formatPeakWindows(scheme: PriceScheme): string {
+  if (scheme.peak === undefined || scheme.peak.length === 0) return ''
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return scheme.peak.map((window) => `${pad(window.start)}:00-${pad(window.end)}:00`).join('、')
 }
 
 /** What one record cost, in both currencies, under the resolved scheme. */
@@ -203,7 +302,7 @@ export function totalsFor(
   records: UsageRecord[],
   schemes: PriceScheme[],
   forcedId?: string,
-): { totals: import('./protocol.ts').CostTotals; priced: number } {
+): { totals: import('./protocol.ts').CostTotals; priced: number; unpricedModels: string[] } {
   let recordsCount = 0
   let inputTokens = 0
   let cacheReadTokens = 0
@@ -213,6 +312,7 @@ export function totalsFor(
   let costCny = 0
   let costUsd = 0
   let priced = 0
+  const unpriced = new Map<string, string>()
   for (const record of records) {
     recordsCount += 1
     inputTokens += record.inputTokens
@@ -225,6 +325,9 @@ export function totalsFor(
       priced += 1
       costCny += cost.costCny
       costUsd += cost.costUsd
+    } else if (record.model.trim() !== '') {
+      const key = normalizeModel(record.model)
+      if (!unpriced.has(key)) unpriced.set(key, record.model)
     }
   }
   const billedInput = inputTokens + cacheReadTokens
@@ -241,5 +344,6 @@ export function totalsFor(
       costUsd,
     },
     priced,
+    unpricedModels: [...unpriced.values()],
   }
 }

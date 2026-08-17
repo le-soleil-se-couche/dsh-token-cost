@@ -10,18 +10,21 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   CostGroupRow,
+  ModelCatalogRow,
   SessionSummaryRow,
   SessionsResponse,
   StatusResponse,
   SummaryResponse,
 } from '../../protocol.ts'
+import { formatPeakWindows } from '../../pricing.ts'
 import { TokenCostApi } from '../api.ts'
-import { formatDay, formatMoney, formatPercent, formatTokens } from '../format.ts'
+import { formatMoney, formatPercent, formatTokens } from '../format.ts'
 import type { TokenCostKey } from '../locales.ts'
 import { resolveSettings, useSettingsValue, type TokenCostSettings } from '../settings-schema.ts'
 import { SessionDetailModal } from '../shared/SessionDetailModal.tsx'
 import { presetRange, validCustomRange, type TimePreset } from '../time-filters.ts'
 import css from './card.module.css'
+import { CustomPricesPanel } from './CustomPricesPanel.tsx'
 
 /** The card's injected share: the bound settings scope. */
 export interface TokenCostSettingsCardFace {
@@ -168,15 +171,11 @@ function SummaryTab(props: TabProps) {
 
   return (
     <>
-      <div className={css.schemeBanner}>
-        <span>{t('config.schemeStatus')}: <strong>{t('config.schemeActive')} {activeScheme?.id ?? 'scheme-a'}</strong></span>
-        {status?.pricing.nextSwitchAt && status.pricing.nextSwitchAt > Date.now() ? (
-          <span>{t('config.schemeNext')}: {formatDay(status.pricing.nextSwitchAt)}</span>
-        ) : null}
-        {activeScheme?.peak !== undefined ? (
-          <span>{t('config.peakHours')}: {activeScheme.peak.map((w) => w.start + '-' + w.end).join(', ')}</span>
-        ) : null}
-      </div>
+      {activeScheme?.peak !== undefined ? (
+        <div className={css.schemeBanner}>
+          <span>{t('config.peakHours')}: <strong>{formatPeakWindows(activeScheme)}</strong></span>
+        </div>
+      ) : null}
       <div className={css.filterRow}>
         {PRESETS.map((entry) => (
           <button
@@ -227,6 +226,11 @@ function SummaryTab(props: TabProps) {
               <span className={css.statDetail}>{t('stat.requests')} {summary.totals.records}</span>
             </div>
           </div>
+          {(summary.unpricedModels ?? []).length > 0 ? (
+            <div className={css.unpricedBanner}>
+              {t('stat.unpricedBanner', { count: summary.unpricedModels.length, models: summary.unpricedModels.join(', ') })}
+            </div>
+          ) : null}
           <GroupTable t={t} title={t('group.byModel')} rows={summary.byModel} money={money} />
           <GroupTable t={t} title={t('group.bySession')} rows={sessionsSorted} money={money} />
           <GroupTable t={t} title={t('group.byDay')} rows={daysSorted} money={money} dateRows />
@@ -275,7 +279,9 @@ function GroupTable(props: {
                 <td className={css.num}>{formatTokens(row.totals.inputTokens)}</td>
                 <td className={css.num}>{formatTokens(row.totals.outputTokens)}</td>
                 <td className={css.num}>{formatPercent(row.totals.cacheHitRate)}</td>
-                <td className={css.num}>{money(row.totals)}</td>
+                <td className={css.num}>
+                  {row.priced === 0 && row.totals.records > 0 ? t('table.unpriced') : money(row.totals)}
+                </td>
               </tr>
             ))}
             {rows.length === 0 ? (
@@ -381,17 +387,43 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
   const [currencyDraft, setCurrencyDraft] = useState(value.currency ?? 'cny')
   const [priceMode, setPriceMode] = useState(value.priceMode ?? 'auto')
   const [customPrices, setCustomPrices] = useState(value.customPrices ?? '')
+  const [pricesValid, setPricesValid] = useState(true)
+  const [panelKey, setPanelKey] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState(false)
   const [failed, setFailed] = useState(false)
   const [jsonInvalid, setJsonInvalid] = useState(false)
   const [status, setStatus] = useState<StatusResponse | null>(null)
+  const [models, setModels] = useState<ModelCatalogRow[]>([])
   const [resyncing, setResyncing] = useState(false)
   const [resynced, setResynced] = useState<string | null>(null)
 
-  useEffect(() => {
+  const loadCatalog = useCallback((): void => {
     api.status().then((response) => { if (response.ok) setStatus(response) }).catch(() => {})
+    api.models().then((response) => { if (response.ok) setModels(response.models) }).catch(() => {})
   }, [api])
+
+  useEffect(loadCatalog, [loadCatalog])
+
+  const persistPrices = useCallback(async (text: string): Promise<void> => {
+    setFailed(false)
+    setSaved(false)
+    try {
+      const response = await api.savePrices(text)
+      if (!response.ok) {
+        setFailed(true)
+        return
+      }
+      setCustomPrices(text)
+      setPricesValid(true)
+      setJsonInvalid(false)
+      setSaved(true)
+      if (response.models.length > 0) setModels(response.models)
+      else loadCatalog()
+    } catch {
+      setFailed(true)
+    }
+  }, [api, loadCatalog])
 
   const jsonFieldsValid = (): boolean => {
     const trimmed = customPrices.trim()
@@ -420,6 +452,7 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
       if (customPrices !== (value.customPrices ?? '')) await scope.set('customPrices', customPrices.trim())
       setDirty(false)
       setSaved(true)
+      loadCatalog()
     } catch {
       setFailed(true)
     }
@@ -430,6 +463,8 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
     setCurrencyDraft(value.currency ?? 'cny')
     setPriceMode(value.priceMode ?? 'auto')
     setCustomPrices(value.customPrices ?? '')
+    setPricesValid(true)
+    setPanelKey((key) => key + 1)
     setDirty(false)
     setJsonInvalid(false)
     setFailed(false)
@@ -443,6 +478,7 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
       const response = await api.resync()
       if (response.ok) {
         setResynced(t('config.resynced', { sessions: response.ledger.sessionCount, records: response.ledger.recordCount }))
+        loadCatalog()
       }
     } catch {
       setResynced(null)
@@ -457,20 +493,10 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
   return (
     <>
       <div className={css.statusGrid}>
-        <div className={css.statusItem}>
-          <span className={css.statusLabel}>{t('config.schemeActive')}</span>
-          <span className={css.statusValue}>{activeScheme?.label ?? 'scheme-a'}</span>
-        </div>
-        <div className={css.statusItem}>
-          <span className={css.statusLabel}>{t('config.schemeNext')}</span>
-          <span className={css.statusValue}>
-            {status?.pricing.nextSwitchAt && status.pricing.nextSwitchAt > 0 ? formatDay(status.pricing.nextSwitchAt) : t('common.na')}
-          </span>
-        </div>
         {activeScheme?.peak !== undefined ? (
           <div className={css.statusItem}>
             <span className={css.statusLabel}>{t('config.peakHours')}</span>
-            <span className={css.statusValue}>{activeScheme.peak.map((w) => w.start + '-' + w.end).join(', ')}</span>
+            <span className={css.statusValue}>{formatPeakWindows(activeScheme)}</span>
           </div>
         ) : null}
         <div className={css.statusItem}>
@@ -510,22 +536,24 @@ function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }
           </select>
           <span className={css.fieldHint}>{t('config.priceModeHint')}</span>
         </div>
-        <div className={css.field}>
-          <label className={css.fieldLabel} htmlFor="token-cost-custom-prices">{t('config.customPrices')}</label>
-          <textarea
-            id="token-cost-custom-prices"
-            className={css.textarea}
-            value={customPrices}
-            spellCheck={false}
-            onChange={(event) => { setCustomPrices(event.target.value); setDirty(true) }}
-          />
-          <span className={css.fieldHint}>{t('config.customPricesHint')}</span>
-        </div>
+        <CustomPricesPanel
+          key={panelKey}
+          t={t}
+          currency={currencyDraft}
+          initialText={customPrices}
+          models={models}
+          onChange={(text, valid) => {
+            setCustomPrices(text)
+            setPricesValid(valid)
+            setJsonInvalid(!valid)
+          }}
+          onCommit={persistPrices}
+        />
         {jsonInvalid ? <div className={css.failed}>{t('config.invalidJson')}</div> : null}
         {failed ? <div className={css.failed}>{t('config.saveFailed')}</div> : null}
         {saved ? <div className={css.saved}>{t('config.saved')}</div> : null}
         <div className={css.actions}>
-          <button type="button" className={css.saveBtn} disabled={!dirty || !writeable} onClick={() => { void save() }}>
+          <button type="button" className={css.saveBtn} disabled={!dirty || !writeable || !pricesValid} onClick={() => { void save() }}>
             {t('config.save')}
           </button>
           <button type="button" className={css.secondaryBtn} disabled={!dirty} onClick={discard}>

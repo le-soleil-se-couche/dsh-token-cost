@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-token-cost",
   "description": "DSH web GUI plugin: token usage (input/output), cache hit/miss and cost statistics per conversation and in aggregate, with auto-switching DeepSeek pricing schemes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

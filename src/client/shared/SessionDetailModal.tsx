@@ -52,9 +52,15 @@ export function SessionDetailModal(props: SessionDetailModalProps) {
   }, [onClose])
 
   const money = (value: number): string => formatMoney(value, currency)
-  const costOf = (costCny: number, costUsd: number): string => money(currency === 'cny' ? costCny : costUsd)
-  // 明细按时间倒序：最新产生的请求在最上面
-  const recordsSorted = [...(detail?.records ?? [])].sort((a, b) => b.time - a.time)
+  const costOf = (costCny: number, costUsd: number, schemeId: string): string => {
+    if (schemeId === '') return t('table.unpriced')
+    return money(currency === 'cny' ? costCny : costUsd)
+  }
+  // Zip before sort: costs[] is aligned with the unsorted records array.
+  const recordsSorted = (detail?.records ?? []).map((record, index) => ({
+    record,
+    cost: detail?.costs[index] ?? { costCny: 0, costUsd: 0, schemeId: '', peak: null },
+  })).sort((left, right) => right.record.time - left.record.time)
 
   return createPortal(
     <div className={css.overlay} onClick={onClose} role="presentation">
@@ -104,19 +110,16 @@ export function SessionDetailModal(props: SessionDetailModalProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {recordsSorted.map((record, index) => {
-                    const cost = detail.costs[index] ?? { costCny: 0, costUsd: 0 }
-                    return (
-                      <tr key={index}>
+                  {recordsSorted.map(({ record, cost }, index) => (
+                      <tr key={`${record.turn}-${record.step}-${index}`}>
                         <td className={css.mono}>{formatClock(record.time)}</td>
                         <td>{record.model || t('common.unknown')}</td>
                         <td className={css.num}>{formatTokens(record.inputTokens)}</td>
                         <td className={css.num}>{formatTokens(record.cacheReadTokens)}</td>
                         <td className={css.num}>{formatTokens(record.outputTokens)}</td>
-                        <td className={css.num}>{costOf(cost.costCny, cost.costUsd)}</td>
+                        <td className={css.num}>{costOf(cost.costCny, cost.costUsd, cost.schemeId)}</td>
                       </tr>
-                    )
-                  })}
+                  ))}
                   {recordsSorted.length === 0 ? (
                     <tr><td colSpan={6} className={css.empty}>{t('common.na')}</td></tr>
                   ) : null}

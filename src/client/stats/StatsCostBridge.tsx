@@ -55,8 +55,11 @@ export function StatsCostBridge(props: StatsCostBridgeProps) {
     const load = (): void => {
       api.session(sessionId).then((response: SessionDetailResponse) => {
         if (!alive || !response.ok) return
+        const unpricedOnly = response.priced === 0 && response.totals.records > 0
         publishCostState({
-          costText: formatCostText(response.totals.costCny, response.totals.costUsd, currency),
+          costText: unpricedOnly
+            ? (currency === 'cny' ? '未知' : 'n/a')
+            : formatCostText(response.totals.costCny, response.totals.costUsd, currency),
           disabled: false,
           sessionId,
           currency,

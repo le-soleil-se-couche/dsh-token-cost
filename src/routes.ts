@@ -8,9 +8,11 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { buildModelCatalog, collectModelUsage } from './catalog.ts'
 import type { SessionLedger } from './ledger.ts'
-import { priceRecord, totalsFor } from './pricing.ts'
-import type { CostGroupRow, CostTotals, PriceScheme, UsageRecord } from './protocol.ts'
+import { parseCustomPrices, PRICE_SCHEMES, priceRecord, totalsFor } from './pricing.ts'
+import type { CustomPriceStore } from './price-store.ts'
+import type { CostGroupRow, ModelPrice, PriceScheme, UsageRecord } from './protocol.ts'
 import { TOKEN_COST_API } from './protocol.ts'
 
 /** Pricing facts resolved from plugin settings per request. */
@@ -26,6 +28,30 @@ export interface TokenCostRoutesDeps {
   pricing: () => PricingSource
   /** Rebuild the catalog: schemes + custom overrides. */
   schemes: () => PriceScheme[]
+  /** Raw custom prices (unmerged) so /models can tell builtin from override. */
+  customPrices: () => Record<string, ModelPrice>
+  /** Persist custom prices independently of the settings document. */
+  priceStore: CustomPriceStore
+}
+
+function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8').trim()
+      if (raw === '') {
+        resolve({})
+        return
+      }
+      try {
+        resolve(JSON.parse(raw) as unknown)
+      } catch (error) {
+        reject(error)
+      }
+    })
+    req.on('error', reject)
+  })
 }
 
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
@@ -93,8 +119,8 @@ function groupBy(
   }
   const rows: CostGroupRow[] = []
   for (const group of groups.values()) {
-    const { totals } = totalsFor(group.records, schemes, forcedId)
-    rows.push({ key: group.label, label: group.label, totals })
+    const { totals, priced } = totalsFor(group.records, schemes, forcedId)
+    rows.push({ key: group.label, label: group.label, totals, priced })
   }
   rows.sort((a, b) => b.totals.costCny - a.totals.costCny)
   return rows
@@ -183,7 +209,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
             selected.push(record)
           }
         }
-        const { totals } = totalsFor(selected, schemes, pricing.priceMode)
+        const { totals, priced, unpricedModels } = totalsFor(selected, schemes, pricing.priceMode)
         const byModel = groupBy(selected, (record) => ({
           key: record.model,
           label: record.model,
@@ -201,6 +227,8 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
           from,
           to,
           totals,
+          priced,
+          unpricedModels,
           byModel,
           bySession,
           byDay,
@@ -246,7 +274,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
         }
         const pricing = deps.pricing()
         const schemes = deps.schemes()
-        const { totals } = totalsFor(session.records, schemes, pricing.priceMode)
+        const { totals, priced } = totalsFor(session.records, schemes, pricing.priceMode)
         const costs = session.records.map((record) => {
           const cost = priceRecord(record, schemes, pricing.priceMode)
           return cost ?? { costCny: 0, costUsd: 0, schemeId: '', peak: null }
@@ -255,8 +283,71 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
           ok: true,
           meta: session.meta,
           totals,
+          priced,
           records: session.records,
           costs,
+        })
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${TOKEN_COST_API}/models`,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'GET')) return
+        await deps.priceStore.whenReady()
+        await ledger.sync()
+        const records: UsageRecord[] = []
+        for (const session of ledger.sessions()) records.push(...session.records)
+        writeJson(res, 200, {
+          ok: true,
+          models: buildModelCatalog(collectModelUsage(records), deps.customPrices(), PRICE_SCHEMES),
+        })
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${TOKEN_COST_API}/prices`,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'POST')) return
+        let body: unknown
+        try {
+          body = await readJsonBody(req)
+        } catch {
+          writeJson(res, 400, { ok: false, error: 'invalid JSON body' })
+          return
+        }
+        const raw = typeof body === 'object' && body !== null
+          ? (body as { customPrices?: unknown }).customPrices
+          : undefined
+        if (typeof raw !== 'string') {
+          writeJson(res, 400, { ok: false, error: 'customPrices string required' })
+          return
+        }
+        let parsed: Record<string, ModelPrice>
+        try {
+          parsed = parseCustomPrices(raw)
+        } catch (error) {
+          writeJson(res, 400, {
+            ok: false,
+            error: error instanceof Error ? error.message : 'invalid custom prices',
+          })
+          return
+        }
+        try {
+          await deps.priceStore.replace(parsed)
+        } catch (error) {
+          writeJson(res, 500, {
+            ok: false,
+            error: error instanceof Error ? error.message : 'failed to persist prices',
+          })
+          return
+        }
+        await ledger.sync()
+        const records: UsageRecord[] = []
+        for (const session of ledger.sessions()) records.push(...session.records)
+        writeJson(res, 200, {
+          ok: true,
+          models: buildModelCatalog(collectModelUsage(records), deps.priceStore.get(), PRICE_SCHEMES),
         })
       },
     },
