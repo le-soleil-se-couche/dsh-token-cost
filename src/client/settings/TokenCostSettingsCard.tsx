@@ -1,8 +1,8 @@
 /**
  * The dsh-token-cost settings card: the summary dashboard (time-filtered
  * totals, grouped tables), the per-session browser, and the pricing/alias
- * configuration. Registers into the `web-ui.plugin.item` slot the Web UI
- * plugin group renders inside the settings page.
+ * configuration. Registers into the `settings.plugin.item` slot the Plugins
+ * settings section renders inside the settings page.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -31,9 +31,9 @@ export interface TokenCostSettingsCardFace {
   settings: SettingsScope<TokenCostSettings>
 }
 
-/** Full props the renderer binds for the web-ui.plugin.item card. */
+/** Full props the renderer binds for the settings.plugin.item card. */
 export type TokenCostSettingsCardProps =
-  PropsRuntime<'web-ui.plugin.item'>
+  PropsRuntime<'settings.plugin.item'>
   & PropsLocale<'token-cost'>
   & InjectFace<TokenCostSettingsCardFace>
 
