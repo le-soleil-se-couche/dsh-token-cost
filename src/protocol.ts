@@ -108,6 +108,12 @@ export interface PriceScheme {
    * windows are present.
    */
   peakOffsetMinutes?: number
+  /**
+   * When true, Saturdays and Sundays (in the scheme's `peakOffsetMinutes`
+   * clock) never bill at the peak rate: the whole weekend is off-peak.
+   * DeepSeek policy since 2026-08-23. Absent on older/other schemes.
+   */
+  weekendIsOffPeak?: boolean
   /** Model id (normalized) -> prices. */
   models: Record<string, ModelPrice>
 }

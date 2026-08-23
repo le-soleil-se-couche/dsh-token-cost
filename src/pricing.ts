@@ -28,6 +28,9 @@ import type { ModelPrice, PriceScheme, PriceSet, UsageRecord } from './protocol.
 /** UTC instant the peak/off-peak scheme starts billing. */
 export const SCHEME_B_EFFECTIVE_FROM = Date.UTC(2026, 7, 16, 16, 0, 0)
 
+/** UTC instant the weekend-off-peak scheme starts billing (2026-08-23 00:00 Beijing). */
+export const SCHEME_C_EFFECTIVE_FROM = Date.UTC(2026, 7, 22, 16, 0, 0)
+
 /** Official DeepSeek peak clock: Beijing / UTC+8. */
 export const PEAK_TZ_OFFSET_MINUTES = 8 * 60
 
@@ -93,6 +96,37 @@ export const PRICE_SCHEMES: PriceScheme[] = [
     label: 'peak-offpeak-2026-08-17',
     effectiveFrom: SCHEME_B_EFFECTIVE_FROM,
     peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
+    peak: [
+      { start: 9, end: 12 },
+      { start: 14, end: 18 },
+    ],
+    models: {
+      'deepseek-v4-flash': {
+        cny: { miss: 3, hit: 0.1, output: 9 },
+        usd: { miss: 0.44, hit: 0.014, output: 1.32 },
+      },
+      'deepseek-v4-pro': {
+        cny: { miss: 9, hit: 0.3, output: 27 },
+        usd: { miss: 1.32, hit: 0.044, output: 3.96 },
+      },
+      'deepseek-chat': {
+        cny: { miss: 2, hit: 0.5, output: 8 },
+        usd: { miss: 0.27, hit: 0.07, output: 1.1 },
+        flat: true,
+      },
+      'deepseek-reasoner': {
+        cny: { miss: 4, hit: 1, output: 16 },
+        usd: { miss: 0.55, hit: 0.14, output: 2.19 },
+        flat: true,
+      },
+    },
+  },
+  {
+    id: 'scheme-c',
+    label: 'peak-offpeak-weekend-offpeak-2026-08-23',
+    effectiveFrom: SCHEME_C_EFFECTIVE_FROM,
+    peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
+    weekendIsOffPeak: true,
     peak: [
       { start: 9, end: 12 },
       { start: 14, end: 18 },
@@ -248,15 +282,27 @@ export function hourInOffset(time: number, offsetMinutes: number): number {
 /**
  * Whether an instant falls inside a scheme's peak window.
  * Hours are evaluated in the scheme's official clock (DeepSeek: UTC+8).
+ * When `scheme.weekendIsOffPeak` is set, Saturdays and Sundays in that
+ * clock never count as peak (DeepSeek policy since 2026-08-23).
  */
 export function isPeakHour(scheme: PriceScheme, time: number): boolean {
   if (scheme.peak === undefined || scheme.peak.length === 0) return false
   const offset = scheme.peakOffsetMinutes ?? PEAK_TZ_OFFSET_MINUTES
+  if (scheme.weekendIsOffPeak === true && isWeekendInOffset(time, offset)) return false
   const hour = hourInOffset(time, offset)
   for (const window of scheme.peak) {
     if (window.start <= hour && hour < window.end) return true
   }
   return false
+}
+
+/** Whether an instant falls on Saturday or Sunday in a fixed UTC offset. */
+export function isWeekendInOffset(time: number, offsetMinutes: number): boolean {
+  // Day of week in UTC, shifted into the target clock: (time + offset) / 86400000 mod 7.
+  const day = Math.floor((time + offsetMinutes * 60_000) / 86_400_000)
+  // 1970-01-01 was a Thursday (4). Saturday=6, Sunday=0 after the shift's epoch.
+  const weekday = (day + 4) % 7
+  return weekday === 6 || weekday === 0
 }
 
 /** Human label for peak windows, e.g. `09:00-12:00、14:00-18:00`. */
