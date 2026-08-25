@@ -1,0 +1,2 @@
+{"type":"request/context","seq":0,"time":1700000000100,"data":{"provider":"provider-fixture","model":"model-fixture"}}
+{"type":"assistant/message","seq":1,"time":1700000000200,"sourceEventSeqs":[],"data":{"turn":1,"step":1,"usage":{"inputTokens":100}}}

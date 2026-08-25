@@ -9,10 +9,14 @@
  */
 
 import { decompress } from 'fzstd'
+import type { Dirent } from 'node:fs'
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { SessionMeta, UsageRecord } from './protocol.ts'
 import { parseSessionLog } from './parser.ts'
+
+/** Parser semantics version; a bump forces authoritative session-log refolding. */
+const LEDGER_VERSION = 2
 
 /** One cached ledger entry. */
 interface LedgerEntry {
@@ -30,34 +34,35 @@ export interface LedgerStats {
 }
 
 interface LedgerFile {
-  version: 1
+  version: typeof LEDGER_VERSION
   sessions: Record<string, LedgerEntry>
 }
 
 /** Locate every session log under a sessions root: absolute file paths. */
 async function findSessionLogs(root: string): Promise<string[]> {
   const files: string[] = []
-  let slugs: string[]
+  let slugs: Dirent[]
   try {
-    slugs = await readdir(root)
+    slugs = await readdir(root, { withFileTypes: true })
   } catch {
     return files
   }
   for (const slug of slugs) {
-    const slugDir = join(root, slug)
-    let sessions: string[]
+    if (!slug.isDirectory()) continue
+    const slugDir = join(root, slug.name)
+    let sessions: Dirent[]
     try {
-      sessions = await readdir(slugDir)
+      sessions = await readdir(slugDir, { withFileTypes: true })
     } catch {
       continue
     }
     for (const session of sessions) {
-      if (!session.startsWith('session-')) continue
-      const file = join(slugDir, session, 'session.jsonl.zstd')
+      if (!session.isDirectory()) continue
+      const file = join(slugDir, session.name, 'session.jsonl.zstd')
       files.push(file)
     }
   }
-  return files
+  return files.sort()
 }
 
 /** Decompress a zstd frame and decode UTF-8. */
@@ -67,13 +72,9 @@ async function readSessionText(file: string): Promise<string> {
   return new TextDecoder().decode(decoded)
 }
 
-/** Session id derived from a log path: the session-* directory name. */
+/** Session id derived from a log path: the immediate parent directory name. */
 export function sessionIdFromPath(file: string): string {
-  const parts = file.split('/')
-  for (let i = parts.length - 1; i >= 0; i -= 1) {
-    if (parts[i].startsWith('session-') && !parts[i].endsWith('.zstd')) return parts[i]
-  }
-  return 'session-unknown'
+  return basename(dirname(file)) || 'session-unknown'
 }
 
 /**
@@ -100,7 +101,7 @@ export class SessionLedger {
     try {
       const text = await readFile(this.ledgerPath, 'utf8')
       const file = JSON.parse(text) as LedgerFile
-      if (file?.version === 1 && typeof file.sessions === 'object') {
+      if (file?.version === LEDGER_VERSION && typeof file.sessions === 'object') {
         for (const [id, entry] of Object.entries(file.sessions)) {
           this.entries.set(id, entry)
         }
@@ -124,10 +125,15 @@ export class SessionLedger {
     await this.load()
     const files = await findSessionLogs(this.sessionsRoot)
     const seen = new Set<string>()
+    const claimed = new Map<string, string>()
     let changed = false
     for (const file of files) {
       const id = sessionIdFromPath(file)
-      seen.add(id)
+      const first = claimed.get(id)
+      if (first !== undefined) {
+        console.warn(`[dsh-token-cost] skipped duplicate session id "${id}" at ${file}; first seen at ${first}`)
+        continue
+      }
       let info
       try {
         info = await stat(file)
@@ -142,10 +148,20 @@ export class SessionLedger {
         && cached.mtimeMs === info.mtimeMs
         && cached.size === info.size
       ) {
+        claimed.set(id, file)
+        seen.add(id)
         continue
       }
-      const text = await readSessionText(file)
-      const parsed = parseSessionLog(text, id, '')
+      let parsed: ReturnType<typeof parseSessionLog>
+      try {
+        const text = await readSessionText(file)
+        parsed = parseSessionLog(text, id, '')
+      } catch (error) {
+        console.warn(`[dsh-token-cost] skipped invalid session log ${file}:`, error)
+        continue
+      }
+      claimed.set(id, file)
+      seen.add(id)
       const records = parsed.records.map((record) => ({
         ...record,
         sessionId: id,
@@ -178,7 +194,7 @@ export class SessionLedger {
     for (const [id, entry] of this.entries) {
       sessions[id] = entry
     }
-    const payload: LedgerFile = { version: 1, sessions }
+    const payload: LedgerFile = { version: LEDGER_VERSION, sessions }
     try {
       const text = JSON.stringify(payload)
       const dir = this.ledgerPath.slice(0, Math.max(this.ledgerPath.lastIndexOf('/'), 0))

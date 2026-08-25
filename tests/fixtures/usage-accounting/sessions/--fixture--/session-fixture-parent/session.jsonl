@@ -1,0 +1,17 @@
+{"type":"session","version":0,"id":"session-fixture-parent","createdAt":1700000000000,"cwd":"/fixture","delegationDepth":0}
+{"type":"request/context","seq":0,"time":1700000000100,"data":{"provider":"provider-fixture","model":"model-fixture"}}
+{"type":"assistant/chunk","seq":1,"time":1700000000200,"data":{"turn":1,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":100,"outputTokens":10,"cacheReadTokens":20,"cacheWriteTokens":3,"reasoningTokens":2}}}}
+{"type":"assistant/chunk","seq":2,"time":1700000000300,"data":{"turn":1,"step":1,"chunk":{"type":"finish","reason":{"kind":"stop"}}}}
+{"type":"assistant/message","seq":3,"time":1700000000400,"sourceEventSeqs":[1,2],"data":{"turn":1,"step":1,"usage":{"inputTokens":100,"outputTokens":12,"cacheReadTokens":20,"cacheWriteTokens":3,"reasoningTokens":3}}}
+{"type":"assistant/chunk","seq":4,"time":1700000000500,"data":{"turn":2,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":7,"outputTokens":2,"cacheReadTokens":5,"cacheWriteTokens":1,"reasoningTokens":1}}}}
+{"type":"assistant/chunk","seq":5,"time":1700000000600,"data":{"turn":2,"step":1,"chunk":{"type":"finish","reason":{"kind":"error","failure":{"message":"fixture-failure","code":"FIXTURE_FAILURE"}}}}}
+{"type":"llm/retry","seq":6,"time":1700000000700,"data":{"retryId":"retry-fixture-001","turn":2,"step":1,"provider":"provider-fixture","mode":"normal","policyKey":"fixture-policy","retry":1,"maxRetries":1,"delayMs":0,"failure":{"message":"fixture-failure","code":"FIXTURE_FAILURE"}}}
+{"type":"llm/retry-started","seq":7,"time":1700000000800,"data":{"retryId":"retry-fixture-001","turn":2,"step":1,"retry":1}}
+{"type":"assistant/chunk","seq":8,"time":1700000000900,"data":{"turn":2,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":11,"outputTokens":4,"cacheReadTokens":13,"cacheWriteTokens":2,"reasoningTokens":2}}}}
+{"type":"assistant/chunk","seq":9,"time":1700000001000,"data":{"turn":2,"step":1,"chunk":{"type":"finish","reason":{"kind":"stop"}}}}
+{"type":"assistant/message","seq":10,"time":1700000001100,"sourceEventSeqs":[8,9],"data":{"turn":2,"step":1,"usage":{"inputTokens":11,"outputTokens":4,"cacheReadTokens":13,"cacheWriteTokens":2,"reasoningTokens":2}}}
+{"type":"assistant/chunk","seq":11,"time":1700000001200,"data":{"turn":3,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":17,"outputTokens":6,"cacheReadTokens":19,"cacheWriteTokens":4,"reasoningTokens":3}}}}
+{"type":"assistant/chunk","seq":12,"time":1700000001300,"data":{"turn":3,"step":1,"chunk":{"type":"finish","reason":{"kind":"fixture-provider-failure","failure":{"message":"fixture-failure","code":"FIXTURE_FAILURE"}}}}}
+{"type":"assistant/message","seq":13,"time":1700000001400,"sourceEventSeqs":[11,12],"data":{"turn":3,"step":1,"usage":{"inputTokens":17,"outputTokens":6,"cacheReadTokens":19,"cacheWriteTokens":4,"reasoningTokens":3}}}
+{"type":"compaction/summary","seq":14,"time":1700000001500,"data":{"compactionId":"compaction-fixture-001","summary":[],"shadowedRange":{"start":1,"end":3},"shadowedSeqs":[1,2,3],"shadowedTokenCount":156,"provider":"provider-fixture","model":"model-fixture","usage":{"inputTokens":31,"outputTokens":9,"cacheReadTokens":37,"cacheWriteTokens":6,"reasoningTokens":5}}}
+{"type":"assistant/chunk","seq":15,"time":1700000001600,"data":{"turn":5,"step":1,"chunk":{"type":"finish","reason":{"kind":"error","failure":{"message":"fixture-failure-without-usage","code":"FIXTURE_FAILURE"}}}}}

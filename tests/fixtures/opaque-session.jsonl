@@ -1,0 +1,3 @@
+{"type":"session","version":0,"id":"opaque-fixture-id","createdAt":1700000000000,"cwd":"/fixture"}
+{"type":"request/context","seq":2,"time":1700000000200,"data":{"provider":"deepseek-official","model":"deepseek-v4-flash"}}
+{"type":"assistant/message","seq":3,"time":1700000000300,"sourceEventSeqs":[],"data":{"turn":1,"step":1,"usage":{"inputTokens":100}}}

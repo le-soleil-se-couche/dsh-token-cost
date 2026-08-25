@@ -8,6 +8,8 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 2026-08-17 update: you can enter unit prices for other models you call. **Add model** writes a local price file immediately (survives refresh) and history recalculates.
 
+2026-08-25 update: the accounting core now uses an attempt-aware fold covering retries after failed calls, `compaction/summary.usage`, and fork `seedLength` boundaries. Ledger schema v2 automatically refolds stale cached totals from the authoritative session logs.
+
 ## What it gives you
 
 - **Per-conversation view**: the session's total cost is embedded directly into the official stats line at the bottom of the conversation (right after `TTFT avg â€¦ Â· â€¦ tok/s`); clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).
@@ -26,9 +28,17 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 ## Data source
 
-The plugin reads DSH's durable session logs (`$DSH_HOME/sessions/<cwd>/<session-id>/session.jsonl.zstd`) and folds the provider-reported usage events into per-request billing records (last-wins per turn/step, mirroring the harness token-meter projection). A compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) caches parsed records; only changed logs are re-parsed. Custom unit prices live beside it in `custom-prices.json`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
+The plugin reads DSH's durable session logs (`$DSH_HOME/sessions/<cwd>/<session-id>/session.jsonl.zstd`) and folds provider-reported usage into per-attempt billing records: the final message replaces the chunk sample within one attempt; a failed finish closes that attempt so a retry under the same turn/step is added separately; `compaction/summary.usage` is an independent call; and a forked child excludes inherited events whose `seq < seedLength`. A compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) caches parsed records; only changed logs are re-parsed, and an accounting-semantics upgrade invalidates stale ledger versions for an authoritative refold. Custom unit prices live beside it in `custom-prices.json`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
 
 Token fields follow the harness convention: `inputTokens` = cache-miss prompt tokens, `cacheReadTokens` = cache-hit prompt tokens (disjoint; together they are the billed input).
+
+The upstream log remains the telemetry boundary: title generation, Web Search, interrupted calls, or other clients cannot be priced when they do not emit usage. The public synthetic fixture and its hand-computed expectations live in `tests/fixtures/usage-accounting/`.
+
+### Accounting improvements versus official master
+
+As of 2026-08-25, DSH official master `b150a551b8` still exposes `tokenUsage` with `stateVersion: 1`. It de-duplicates chunk/message samples within one attempt, but does not yet fold `compaction/summary.usage`; a retry under the same `(turn, step)` still replaces a failed attempt's usage; and cross-session consumers must separately exclude the inherited prefix where `seq < seedLength`.
+
+This plugin covers those boundaries and uses ledger v2 to invalidate totals produced under the older semantics. In the narrowly defined scope of settling usage already present in DSH session logs, the plugin is currently ahead of official master. That does not make it a substitute for the official bill or recover usage that upstream never logged. All four buckets pass an independent synthetic conformance checker; see [deepseek-harness Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954).
 
 ## Installation
 

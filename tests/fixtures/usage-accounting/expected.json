@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "fixtureDataKind": "fully-synthetic",
+  "fold": {
+    "session-fixture-parent": {
+      "records": 5,
+      "inputTokens": 166,
+      "cacheReadTokens": 94,
+      "cacheWriteTokens": 16,
+      "outputTokens": 33,
+      "reasoningTokens": 14
+    },
+    "session-fixture-child": {
+      "records": 1,
+      "inputTokens": 41,
+      "cacheReadTokens": 43,
+      "cacheWriteTokens": 7,
+      "outputTokens": 10,
+      "reasoningTokens": 6
+    },
+    "aggregate": {
+      "records": 6,
+      "inputTokens": 207,
+      "cacheReadTokens": 137,
+      "cacheWriteTokens": 23,
+      "outputTokens": 43,
+      "reasoningTokens": 20
+    }
+  }
+}
