@@ -16,7 +16,7 @@ import type { SessionMeta, UsageRecord } from './protocol.ts'
 import { parseSessionLog } from './parser.ts'
 
 /** Parser semantics version; a bump forces authoritative session-log refolding. */
-const LEDGER_VERSION = 2
+const LEDGER_VERSION = 3
 
 /** One cached ledger entry. */
 interface LedgerEntry {
@@ -72,9 +72,51 @@ async function readSessionText(file: string): Promise<string> {
   return new TextDecoder().decode(decoded)
 }
 
-/** Session id derived from a log path: the immediate parent directory name. */
+/** Mirror the official injective UTF-16 path-segment encoding for validation. */
+function encodeSessionSegment(raw: string): string {
+  if (raw.length === 0) throw new Error('cannot encode an empty session id')
+  if (raw === '.') return '~002E'
+  if (raw === '..') return '~002E~002E'
+  let encoded = ''
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index)
+    const char = String.fromCharCode(code)
+    encoded += char !== '~' && /^[A-Za-z0-9._-]$/.test(char)
+      ? char
+      : `~${code.toString(16).toUpperCase().padStart(4, '0')}`
+  }
+  return encoded
+}
+
+/** Decode one canonical DSH session directory segment back to its header id. */
+function decodeSessionSegment(encoded: string): string {
+  if (encoded.length === 0) throw new Error('session directory name is empty')
+  let raw = ''
+  for (let index = 0; index < encoded.length; index += 1) {
+    const char = encoded[index]!
+    if (char !== '~') {
+      if (!/^[A-Za-z0-9._-]$/.test(char)) {
+        throw new Error(`session directory contains an unsafe character at offset ${index}`)
+      }
+      raw += char
+      continue
+    }
+    const escape = encoded.slice(index + 1, index + 5)
+    if (!/^[0-9A-F]{4}$/.test(escape)) {
+      throw new Error(`session directory contains an invalid escape at offset ${index}`)
+    }
+    raw += String.fromCharCode(Number.parseInt(escape, 16))
+    index += 4
+  }
+  if (encodeSessionSegment(raw) !== encoded) {
+    throw new Error('session directory name is not canonically encoded')
+  }
+  return raw
+}
+
+/** Session id decoded from the immediate parent directory of a session log. */
 export function sessionIdFromPath(file: string): string {
-  return basename(dirname(file)) || 'session-unknown'
+  return decodeSessionSegment(basename(dirname(file)))
 }
 
 /**
@@ -128,7 +170,13 @@ export class SessionLedger {
     const claimed = new Map<string, string>()
     let changed = false
     for (const file of files) {
-      const id = sessionIdFromPath(file)
+      let id: string
+      try {
+        id = sessionIdFromPath(file)
+      } catch (error) {
+        console.warn(`[dsh-token-cost] skipped invalid session directory ${file}:`, error)
+        continue
+      }
       const first = claimed.get(id)
       if (first !== undefined) {
         console.warn(`[dsh-token-cost] skipped duplicate session id "${id}" at ${file}; first seen at ${first}`)

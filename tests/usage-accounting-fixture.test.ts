@@ -35,6 +35,8 @@ const MISSING_HEADER_SOURCE = join(__dirname, 'fixtures', 'missing-session-heade
 const MISSING_HEADER_ZSTD = join(__dirname, 'fixtures', 'missing-session-header.jsonl.zstd')
 const MISSING_ID_SOURCE = join(__dirname, 'fixtures', 'missing-session-id.jsonl')
 const MISSING_ID_ZSTD = join(__dirname, 'fixtures', 'missing-session-id.jsonl.zstd')
+const ESCAPED_ID_SOURCE = join(__dirname, 'fixtures', 'escaped-session-id.jsonl')
+const ESCAPED_ID_ZSTD = join(__dirname, 'fixtures', 'escaped-session-id.jsonl.zstd')
 const EXPECTED = JSON.parse(readFileSync(join(ROOT, 'expected.json'), 'utf8')) as FixtureExpected
 
 function totals(records: UsageRecord[]): FixtureTotals {
@@ -117,8 +119,8 @@ describe('public usage-accounting fixture', () => {
 
     // Each non-zero failed attempt remains billable alongside its retry.
     expect(parent.records.filter((record) => record.turn === 2)).toHaveLength(2)
-    // A merge-extended kind is not a boundary under the current AgentLoop
-    // contract, so its assistant message replaces the preceding chunk sample.
+    // Only retry-started opens another attempt, so this finish kind does not
+    // stop its assistant message from replacing the preceding chunk sample.
     expect(parent.records.filter((record) => record.turn === 3)).toHaveLength(1)
     // Compaction is an independent call outside the loop turn vocabulary.
     expect(parent.records.filter((record) => record.turn === -1)).toHaveLength(1)
@@ -138,6 +140,7 @@ describe('public usage-accounting fixture', () => {
       [OPAQUE_SOURCE, OPAQUE_ZSTD],
       [MISSING_HEADER_SOURCE, MISSING_HEADER_ZSTD],
       [MISSING_ID_SOURCE, MISSING_ID_ZSTD],
+      [ESCAPED_ID_SOURCE, ESCAPED_ID_ZSTD],
     ] as const
     for (const [source, compressed] of extraFixtures) {
       const sourceText = readFileSync(source, 'utf8')
@@ -149,7 +152,7 @@ describe('public usage-accounting fixture', () => {
       ...jsonl(CHILD),
       ...extraFixtures.flatMap(([source]) => jsonl(source)),
     ]
-    expect(events).toHaveLength(33)
+    expect(events).toHaveLength(36)
     const fixtureFiles = filesUnder(ROOT)
     expect(fixtureFiles).toEqual([
       'README.md',
@@ -182,6 +185,7 @@ describe('public usage-accounting fixture', () => {
     const allowedStrings = new Set([
       ...allowedEventTypes,
       'session-fixture-parent', 'session-fixture-child', '/fixture',
+      'session/child',
       'opaque-fixture-id', 'deepseek-official', 'deepseek-v4-flash',
       'provider-fixture', 'model-fixture', 'usage', 'finish', 'stop', 'error',
       'fixture-provider-failure', 'fixture-failure',

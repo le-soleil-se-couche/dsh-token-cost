@@ -10,6 +10,8 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 2026-08-25 update: the accounting core now uses an attempt-aware fold covering retries after failed calls, `compaction/summary.usage`, and fork `seedLength` boundaries. Ledger schema v2 automatically refolds stale cached totals from the authoritative session logs.
 
+2026-08-28 update: retry boundaries now follow the official `llm/retry-started` event, official session-id directory encoding is supported, and the comparison with `0.1.2-alpha.1` is current. Ledger schema v3 automatically refolds existing v2 caches.
+
 ## What it gives you
 
 - **Per-conversation view**: the session's total cost is embedded directly into the official stats line at the bottom of the conversation (right after `TTFT avg â€¦ Â· â€¦ tok/s`); clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).
@@ -28,17 +30,17 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 ## Data source
 
-The plugin reads DSH's durable session logs (`$DSH_HOME/sessions/<cwd>/<session-id>/session.jsonl.zstd`) and folds provider-reported usage into per-attempt billing records: the final message replaces the chunk sample within one attempt; a failed finish closes that attempt so a retry under the same turn/step is added separately; `compaction/summary.usage` is an independent call; and a forked child excludes inherited events whose `seq < seedLength`. A compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) caches parsed records; only changed logs are re-parsed, and an accounting-semantics upgrade invalidates stale ledger versions for an authoritative refold. Custom unit prices live beside it in `custom-prices.json`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
+The plugin reads DSH's durable session logs (`$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.jsonl.zstd`; the raw session id is in the first-line header) and folds provider-reported usage into per-attempt billing records: the final message replaces the chunk sample within one attempt; only `llm/retry-started` separates adjacent attempts under the same turn/step, so a planned retry that never actually begins does not open another billing slot; official `compaction/summary.usage` is an independent call; and a forked child excludes inherited events whose `seq < seedLength`. A compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) caches parsed records; only changed logs are re-parsed, and an accounting-semantics upgrade invalidates stale ledger versions for an authoritative refold. Custom unit prices live beside it in `custom-prices.json`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
 
 Token fields follow the harness convention: `inputTokens` = cache-miss prompt tokens, `cacheReadTokens` = cache-hit prompt tokens (disjoint; together they are the billed input).
 
-The upstream log remains the telemetry boundary: title generation, Web Search, interrupted calls, or other clients cannot be priced when they do not emit usage. The public synthetic fixture and its hand-computed expectations live in `tests/fixtures/usage-accounting/`.
+The upstream log remains the telemetry boundary: title generation, Web Search, interrupted calls, failed summaries, or other clients cannot be priced when they do not emit usage. The public synthetic fixture and its hand-computed expectations live in `tests/fixtures/usage-accounting/`.
 
-### Accounting improvements versus official master
+### Accounting differences versus DSH 0.1.2-alpha.1
 
-As of 2026-08-25, DSH official master `b150a551b8` still exposes `tokenUsage` with `stateVersion: 1`. It de-duplicates chunk/message samples within one attempt, but does not yet fold `compaction/summary.usage`; a retry under the same `(turn, step)` still replaces a failed attempt's usage; and cross-session consumers must separately exclude the inherited prefix where `seq < seedLength`.
+The DSH `0.1.2-alpha.1` source snapshot is [`cd5ef81481`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc): `tokenUsage` has moved to `stateVersion: 2` and fixes same-step retry replacement through `llm/retry-started`. That official projection still folds only `assistant/chunk` and `assistant/message`, not the `compaction/summary.usage` already present in official logs; cross-session consumers must also continue to exclude the inherited prefix where `seq < seedLength`.
 
-This plugin covers those boundaries and uses ledger v2 to invalidate totals produced under the older semantics. In the narrowly defined scope of settling usage already present in DSH session logs, the plugin is currently ahead of official master. That does not make it a substitute for the official bill or recover usage that upstream never logged. All four buckets pass an independent synthetic conformance checker; see [deepseek-harness Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954).
+This plugin follows the official retry semantics and additionally covers `compaction/summary.usage` and fork `seedLength`, using ledger v3 to invalidate totals produced under older semantics. In the narrowly defined scope of settling usage that official DSH has already written to session logs, the plugin remains ahead of that official release. That does not make it a substitute for the official bill or recover usage that upstream never logged. A community proposal adds failed-summary usage to `compaction/end`, but that field has no official schema yet, so the plugin does not price unknown extension fields. See the [latest discussion](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18176363). The original four-bucket independent synthetic conformance result remains at [Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954), with additional targeted retry, compaction, and directory-encoding tests in this repository.
 
 ## Installation
 

@@ -84,6 +84,22 @@ describe('parseSessionLog', () => {
     ])
   })
 
+  it('uses retry-started as the boundary when a failure finish is absent', () => {
+    const log = [
+      { type: 'session', version: 0, id: 'session-explicit-retry', createdAt: 1, cwd: '/fixture' },
+      { type: 'request/context', seq: 0, time: 1, data: { provider: 'fixture', model: 'fixture' } },
+      { type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 2 } } } },
+      { type: 'llm/retry-started', seq: 2, time: 3, data: { retryId: 'fixture-retry', turn: 1, step: 1, retry: 1 } },
+      { type: 'assistant/message', seq: 3, time: 4, sourceEventSeqs: [], data: { turn: 1, step: 1, usage: { inputTokens: 5, outputTokens: 4 } } },
+    ].map((event) => JSON.stringify(event)).join('\n')
+
+    const records = parseSessionLog(log, 'session-explicit-retry', '').records
+    expect(records.map((record) => [record.inputTokens, record.outputTokens])).toEqual([
+      [3, 2],
+      [5, 4],
+    ])
+  })
+
   it('does not invent usage when a no-usage abort is followed by a started retry', () => {
     const log = [
       { type: 'session', version: 0, id: 'session-aborted', createdAt: 1, cwd: '/fixture' },
@@ -99,21 +115,21 @@ describe('parseSessionLog', () => {
     expect(records[0]).toMatchObject({ inputTokens: 5, outputTokens: 4 })
   })
 
-  it('folds a message that cites a closed failure finish back into that attempt', () => {
+  it('does not split an attempt on a failure finish without retry-started', () => {
     const log = [
       { type: 'session', version: 0, id: 'session-late-message', createdAt: 1, cwd: '/fixture' },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'fixture', model: 'fixture' } },
       { type: 'assistant/chunk', seq: 1, time: 2, data: { turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 2 } } } },
       { type: 'assistant/chunk', seq: 2, time: 3, data: { turn: 1, step: 1, chunk: { type: 'finish', reason: { kind: 'error', failure: { message: 'fixture', code: 'FIXTURE' } } } } },
-      { type: 'assistant/message', seq: 3, time: 4, sourceEventSeqs: [1, 2], data: { turn: 1, step: 1, usage: { inputTokens: 3, outputTokens: 2 } } },
+      { type: 'assistant/message', seq: 3, time: 4, sourceEventSeqs: [1, 2], data: { turn: 1, step: 1, usage: { inputTokens: 4, outputTokens: 3 } } },
     ].map((event) => JSON.stringify(event)).join('\n')
 
     const records = parseSessionLog(log, 'session-late-message', '').records
     expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({ inputTokens: 3, outputTokens: 2 })
+    expect(records[0]).toMatchObject({ inputTokens: 4, outputTokens: 3 })
   })
 
-  it('preserves the closed attempt route when a late message arrives after a route change', () => {
+  it('preserves the attempt route when its final message follows a route change', () => {
     const log = [
       { type: 'session', version: 0, id: 'session-late-route', createdAt: 1, cwd: '/fixture' },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider-a', model: 'model-a' } },
@@ -131,5 +147,27 @@ describe('parseSessionLog', () => {
       inputTokens: 3,
       outputTokens: 2,
     })
+  })
+
+  it('counts official compaction summary usage and ignores unofficial end usage', () => {
+    const log = [
+      { type: 'session', version: 0, id: 'session-compaction', createdAt: 1, cwd: '/fixture' },
+      { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider-fallback', model: 'model-fallback' } },
+      { type: 'compaction/summary', seq: 1, time: 2, data: { compactionId: 'summary-success', provider: 'provider-summary', model: 'model-summary', usage: { inputTokens: 31, outputTokens: 9, cacheReadTokens: 37, cacheWriteTokens: 6 } } },
+      { type: 'compaction/end', seq: 2, time: 3, data: { compactionId: 'unofficial-carrier', turn: null, error: 'truncated', provider: 'provider-end', model: 'model-end', usage: { inputTokens: 60, outputTokens: 8 } } },
+    ].map((event) => JSON.stringify(event)).join('\n')
+
+    const records = parseSessionLog(log, 'session-compaction', '').records
+    expect(records).toHaveLength(1)
+    expect(records).toEqual([
+      expect.objectContaining({
+        turn: -1,
+        step: 1,
+        provider: 'provider-summary',
+        model: 'model-summary',
+        inputTokens: 31,
+        outputTokens: 9,
+      }),
+    ])
   })
 })

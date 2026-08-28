@@ -6,7 +6,7 @@ import { copyFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { SessionLedger } from '../src/ledger.ts'
+import { SessionLedger, sessionIdFromPath } from '../src/ledger.ts'
 
 /** Committed zstd fixtures: session-a bills 100 input tokens, session-b 200. */
 const FIXTURE_A = join(__dirname, 'fixtures', 'session-a.jsonl.zstd')
@@ -14,8 +14,19 @@ const FIXTURE_B = join(__dirname, 'fixtures', 'session-b.jsonl.zstd')
 const FIXTURE_OPAQUE = join(__dirname, 'fixtures', 'opaque-session.jsonl.zstd')
 const FIXTURE_MISSING_HEADER = join(__dirname, 'fixtures', 'missing-session-header.jsonl.zstd')
 const FIXTURE_MISSING_ID = join(__dirname, 'fixtures', 'missing-session-id.jsonl.zstd')
+const FIXTURE_ESCAPED_ID = join(__dirname, 'fixtures', 'escaped-session-id.jsonl.zstd')
 
 describe('SessionLedger', () => {
+  it('decodes the official canonical session-id directory encoding', () => {
+    expect(sessionIdFromPath('/sessions/--fixture--/session~002Fchild/session.jsonl.zstd'))
+      .toBe('session/child')
+    expect(sessionIdFromPath('/sessions/--fixture--/~002E/session.jsonl.zstd')).toBe('.')
+    expect(() => sessionIdFromPath('/sessions/--fixture--/session~00ff/session.jsonl.zstd'))
+      .toThrow('invalid escape')
+    expect(() => sessionIdFromPath('/sessions/--fixture--/session~0041/session.jsonl.zstd'))
+      .toThrow('not canonically encoded')
+  })
+
   it('parses new sessions, skips unchanged files, and re-parses changed ones', async () => {
     const root = mkdtempSync(join(tmpdir(), 'token-cost-test-'))
     const dir = join(root, '--tmp--')
@@ -52,6 +63,18 @@ describe('SessionLedger', () => {
     const stats = await ledger.sync()
     expect(stats.sessionCount).toBe(1)
     expect(ledger.session('opaque-fixture-id')!.records[0]!.inputTokens).toBe(100)
+  })
+
+  it('loads an encoded session directory under the raw header id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'token-cost-escaped-session-test-'))
+    const dir = join(root, '--tmp--', 'session~002Fchild')
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(dir, { recursive: true })
+    copyFileSync(FIXTURE_ESCAPED_ID, join(dir, 'session.jsonl.zstd'))
+
+    const ledger = new SessionLedger(root, join(root, 'ledger.json'))
+    expect(await ledger.sync()).toMatchObject({ sessionCount: 1, recordCount: 1 })
+    expect(ledger.session('session/child')!.records[0]!.inputTokens).toBe(123)
   })
 
   it('skips a copied session artifact when the header id disagrees with its directory', async () => {
@@ -110,7 +133,7 @@ describe('SessionLedger', () => {
     }
   })
 
-  it('invalidates a version-1 ledger and persists a version-2 refold', async () => {
+  it('invalidates a version-2 ledger and persists a version-3 refold', async () => {
     const root = mkdtempSync(join(tmpdir(), 'token-cost-ledger-version-test-'))
     const dir = join(root, '--tmp--', 'session-abc')
     const ledgerPath = join(root, 'ledger.json')
@@ -120,7 +143,7 @@ describe('SessionLedger', () => {
     copyFileSync(FIXTURE_A, file)
     const info = statSync(file)
     writeFileSync(ledgerPath, JSON.stringify({
-      version: 1,
+      version: 2,
       sessions: {
         'session-abc': {
           file,
@@ -154,6 +177,6 @@ describe('SessionLedger', () => {
     const ledger = new SessionLedger(root, ledgerPath)
     await ledger.sync()
     expect(ledger.session('session-abc')!.records[0]!.inputTokens).toBe(100)
-    expect(JSON.parse(readFileSync(ledgerPath, 'utf8')).version).toBe(2)
+    expect(JSON.parse(readFileSync(ledgerPath, 'utf8')).version).toBe(3)
   })
 })

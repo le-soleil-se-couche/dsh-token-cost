@@ -23,10 +23,9 @@ An additional failed request with no usage sample confirms that the fold does
 not invent a zero-valued billing record.
 
 A synthetic merge-extended finish kind carrying `failure` is followed by its
-assistant message. Current AgentLoop only closes `error | aborted`; treating
-every `failure` field as a boundary in the downstream fold would double-count
-this counterexample. This keeps the hardening question raised in
-`deepseek-ai/deepseek-harness` discussion #1886 explicit while it is reviewed.
+assistant message. Only the durable `llm/retry-started` event opens a new
+provider attempt; treating a finish or arbitrary `failure` field as that
+boundary would double-count this counterexample.
 
 `expected.json` contains only hand-computed totals for the synthetic events.
 The real reconciliation remains outside this public fixture; aggregate numbers

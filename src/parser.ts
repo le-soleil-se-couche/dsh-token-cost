@@ -7,13 +7,13 @@
  *   (`header.config.{provider, model}`) set the model of the current request;
  * - `assistant/chunk` with `chunk.type === 'usage'` reports per-step usage;
  * - `assistant/message` carries the final usage for the same turn/step.
- * - `assistant/chunk` with a failure finish closes one provider attempt;
+ * - `llm/retry-started` is the canonical boundary between provider attempts;
  * - `compaction/summary.usage` reports an independent summarizer call.
  *
  * Within one provider attempt the LAST usage wins (message overrides its chunk
- * sample). A failure finish closes that attempt, so a retry under the same
- * (turn, step) adds another billable record. Forked children count only their
- * own events (`seq >= seedLength`) during cross-session aggregation.
+ * sample). A retry under the same (turn, step) adds another billable record.
+ * Forked children count only their own events (`seq >= seedLength`) during
+ * cross-session aggregation.
  */
 
 import type { SessionMeta, UsageRecord } from './protocol.ts'
@@ -28,14 +28,6 @@ function stepKey(turn: number | undefined, step: number | undefined): string {
   return `${turn ?? 0}:${step ?? 0}`
 }
 
-/** Current AgentLoop contract: only error/aborted finishes close an attempt. */
-function closesAttempt(chunk: Record<string, unknown> | undefined): boolean {
-  if (chunk?.type !== 'finish') return false
-  const reason = chunk.reason as Record<string, unknown> | undefined
-  if (reason === undefined) return false
-  return reason.kind === 'error' || reason.kind === 'aborted'
-}
-
 /** Parse one session log text into meta + per-step usage records. */
 export function parseSessionLog(text: string, sessionId: string, fallbackCwd: string): ParsedSession {
   let createdAt = 0
@@ -48,12 +40,6 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
   let headerSeen = false
   let eventCount = 0
   const attemptByStep = new Map<string, number>()
-  const closedFinishBySeq = new Map<number, {
-    base: string
-    attempt: number
-    provider: string
-    model: string
-  }>()
   const byAttempt = new Map<string, UsageRecord>()
   const independent: UsageRecord[] = []
 
@@ -127,18 +113,19 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
         if (!ownsBillingEvent) break
         if (chunk?.type === 'usage') {
           recordAttempt(data, chunk.usage, time)
-        } else if (closesAttempt(chunk)) {
-          closeAttempt(data, seq)
         }
         break
       }
       case 'assistant/message': {
         const data = event.data as Record<string, unknown> | undefined
         if (!ownsBillingEvent || data?.usage === undefined) break
-        const sourceEventSeqs = Array.isArray(event.sourceEventSeqs)
-          ? event.sourceEventSeqs.filter((value): value is number => typeof value === 'number')
-          : undefined
-        recordAttempt(data, data.usage, time, sourceEventSeqs)
+        recordAttempt(data, data.usage, time)
+        break
+      }
+      case 'llm/retry-started': {
+        const data = event.data as Record<string, unknown> | undefined
+        if (!ownsBillingEvent) break
+        startRetry(data)
         break
       }
       case 'compaction/summary': {
@@ -156,19 +143,13 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
     data: Record<string, unknown> | undefined,
     usage: unknown,
     time: number,
-    sourceEventSeqs?: number[],
   ): void {
     const u = usage as Record<string, unknown> | undefined
     if (u === undefined) return
     const turn = typeof data?.turn === 'number' ? data.turn : 0
     const step = typeof data?.step === 'number' ? data.step : 0
     const base = stepKey(turn, step)
-    const closed = sourceEventSeqs
-      ?.map((seq) => closedFinishBySeq.get(seq))
-      .find((entry) => entry?.base === base)
-    const attempt = closed !== undefined
-      ? closed.attempt
-      : (attemptByStep.get(base) ?? 0)
+    const attempt = attemptByStep.get(base) ?? 0
     const key = `${base}:${attempt}`
     const previous = byAttempt.get(key)
     byAttempt.set(key, {
@@ -177,8 +158,8 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
       step,
       sessionId,
       sessionLabel: title !== '' ? title : sessionId,
-      provider: previous?.provider || closed?.provider || provider || '',
-      model: previous?.model || closed?.model || model || '',
+      provider: previous?.provider || provider || '',
+      model: previous?.model || model || '',
       inputTokens: toCount(u.inputTokens, previous?.inputTokens),
       cacheReadTokens: toCount(u.cacheReadTokens, previous?.cacheReadTokens),
       cacheWriteTokens: toCount(u.cacheWriteTokens, previous?.cacheWriteTokens),
@@ -187,17 +168,11 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
     })
   }
 
-  function closeAttempt(
-    data: Record<string, unknown> | undefined,
-    seq: number | undefined,
-  ): void {
+  function startRetry(data: Record<string, unknown> | undefined): void {
     const turn = typeof data?.turn === 'number' ? data.turn : 0
     const step = typeof data?.step === 'number' ? data.step : 0
     const base = stepKey(turn, step)
     const attempt = attemptByStep.get(base) ?? 0
-    if (seq !== undefined) {
-      closedFinishBySeq.set(seq, { base, attempt, provider, model })
-    }
     attemptByStep.set(base, attempt + 1)
   }
 

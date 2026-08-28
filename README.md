@@ -14,6 +14,8 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 2026-08-25 更新：计量内核升级为 attempt-aware fold，补齐失败调用后 retry、`compaction/summary.usage` 与 fork `seedLength` 边界；账本 schema 升至 v2，旧缓存会从权威 session logs 自动重折叠。
 
+2026-08-28 更新：retry 边界与官方 `llm/retry-started` 对齐，补充官方 session id 目录编码兼容，并刷新与 `0.1.2-alpha.1` 的差异说明。账本 schema 升至 v3，已有 v2 缓存会自动重折叠。
+
 ## 功能
 
 - **单对话视图**：对话页面底部官方状态行（「首 token 平均 … · … tok/s」之后）直接嵌入本会话消耗费用，点击即可打开按请求的明细弹窗（时间 / 模型 / 缓存未命中 / 缓存命中 / 输出 / 费用，最新在上）。
@@ -32,17 +34,17 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 ## 数据来源
 
-插件读取 DSH 的持久会话日志（`$DSH_HOME/sessions/<cwd>/<session-id>/session.jsonl.zstd`），把 provider 上报的 usage 事件折叠为按调用尝试的计费记录：同一次 attempt 内最终 message 替换 chunk 样本；失败 finish 会结算当前 attempt，让同一 turn/step 的 retry 另行累加；`compaction/summary.usage` 作为独立调用计入；聚合 fork 子会话时跳过 `seq < seedLength` 的继承前缀。紧凑账本（`$DSH_HOME/storages/dsh-token-cost/ledger.json`）缓存解析结果，只重解析变化的日志；计量语义升级会自动使旧账本失效并从 session logs 重折叠。自定义单价存在同目录的 `custom-prices.json`。zstd 解压使用 fzstd（纯 JS 零依赖）。
+插件读取 DSH 的持久会话日志（`$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.jsonl.zstd`；原始 session id 位于日志首行 header），把 provider 上报的 usage 事件折叠为按调用尝试的计费记录：同一次 attempt 内最终 message 替换 chunk 样本；只有 `llm/retry-started` 会切开同一 turn/step 的相邻尝试，避免把尚未真正开始的 retry 误计为新调用；官方已有的 `compaction/summary.usage` 作为独立调用计入；聚合 fork 子会话时跳过 `seq < seedLength` 的继承前缀。紧凑账本（`$DSH_HOME/storages/dsh-token-cost/ledger.json`）缓存解析结果，只重解析变化的日志；计量语义升级会自动使旧账本失效并从 session logs 重折叠。自定义单价存在同目录的 `custom-prices.json`。zstd 解压使用 fzstd（纯 JS 零依赖）。
 
 Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cacheReadTokens` = 缓存命中部分（两者不相交，相加即计费输入）。
 
-统计边界仍由上游日志决定：标题生成、Web Search、被中断调用或其他客户端若没有写出 usage，插件不会虚构 token 或费用。可公开复核的 synthetic fixture 与手算结果位于 `tests/fixtures/usage-accounting/`。
+统计边界仍由上游日志决定：标题生成、Web Search、被中断调用、失败摘要或其他客户端若没有写出 usage，插件不会虚构 token 或费用。可公开复核的 synthetic fixture 与手算结果位于 `tests/fixtures/usage-accounting/`。
 
-### 计量优化与官方差异
+### 与 DSH 0.1.2-alpha.1 的计量差异
 
-截至 2026-08-25，DSH 官方 master `b150a551b8` 的 `tokenUsage` projection 仍为 `stateVersion: 1`：它能去重同一次 attempt 的 chunk/message 样本，但尚未折叠 `compaction/summary.usage`，失败 attempt 后同一 `(turn, step)` 的 retry 仍会覆盖前一次 usage；跨 session 汇总也需要消费方自行排除 `seq < seedLength` 的继承前缀。
+DSH `0.1.2-alpha.1` 对应源码快照 [`cd5ef81481`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc)：`tokenUsage` 已升到 `stateVersion: 2`，并通过 `llm/retry-started` 修复同一步 retry 覆盖前次 usage 的问题。该版本官方 projection 仍只折叠 `assistant/chunk` 与 `assistant/message`，尚未计入已经存在于官方日志中的 `compaction/summary.usage`；跨 session 汇总也仍需消费方自行排除 `seq < seedLength` 的继承前缀。
 
-本插件已经覆盖这些边界，并用 ledger v2 自动使旧口径缓存失效。在“已写入 DSH session logs 的 usage 如何结算”这一明确范围内，本插件当前领先于官方 master；这不代表插件能替代官方账单，也不扩大上游没有记录 usage 的遥测边界。独立 synthetic conformance checker 的四个 bucket 已逐项通过，记录见 [deepseek-harness Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954)。
+本插件跟进了官方 retry 语义，并额外覆盖 `compaction/summary.usage` 与 fork `seedLength`，使用 ledger v3 自动使旧口径缓存失效。在“官方已经写入 DSH session logs 的 usage 如何结算”这一明确范围内，本插件相对该官方版本仍领先；这不代表插件能替代官方账单，也不扩大上游没有记录 usage 的遥测边界。社区方案提出把失败摘要 usage 新增到 `compaction/end`，但该字段尚无官方 schema，插件不会把未知扩展字段直接换算成费用；背景见 [最新讨论](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18176363)。原四个 bucket 的独立 synthetic conformance checker 记录见 [Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954)，仓库内另有 retry、compaction 与目录编码的针对性测试。
 
 ## 安装
 
