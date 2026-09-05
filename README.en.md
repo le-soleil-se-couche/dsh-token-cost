@@ -12,7 +12,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 2026-08-28 update: retry boundaries now follow the official `llm/retry-started` event, official session-id directory encoding is supported, and the comparison with `0.1.2-alpha.1` is current. Ledger schema v3 automatically refolds existing v2 caches.
 
-2026-09-05 update: this release uses the official npm `0.1.2-rc.1` SDK and its native settings and plugin-card types. It also reads session format v2, with ledger schema v4. Host SDK compatibility and log protocol support are verified separately: passing v2 synthetic fixtures does not establish runtime acceptance on a `0.1.3-alpha.1` host.
+2026-09-05 update: this release uses the official npm `0.1.2-rc.1` SDK and its native settings and plugin-card types. It also reads session format v2, with ledger schema v4; fixes ledger-directory creation on Windows paths; preserves an explicit `flat: false` custom price through the settings form and local file; and refreshes an existing stats-line cost marker when new cost data arrives. Host SDK compatibility and log protocol support are verified separately: passing v2 synthetic fixtures does not establish runtime acceptance on a `0.1.3-alpha.1` host.
 
 ## What it gives you
 

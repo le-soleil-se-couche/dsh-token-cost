@@ -16,7 +16,7 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 2026-08-28 更新：retry 边界与官方 `llm/retry-started` 对齐，补充官方 session id 目录编码兼容，并刷新与 `0.1.2-alpha.1` 的差异说明。账本 schema 升至 v3，已有 v2 缓存会自动重折叠。
 
-2026-09-05 更新：本版本使用官方 npm `0.1.2-rc.1` SDK，直接消费官方设置与插件卡片类型；同时增加 session format v2 读取，账本 schema 为 v4。宿主 SDK 与日志协议分别验证：v2 synthetic fixture 通过不代表 `0.1.3-alpha.1` 宿主运行已验收。
+2026-09-05 更新：本版本使用官方 npm `0.1.2-rc.1` SDK，直接消费官方设置与插件卡片类型；同时增加 session format v2 读取，账本 schema 为 v4；并修复 Windows 路径下账本目录创建、显式 `flat: false` 自定义价格持久化，以及已有统计行费用标记的刷新。宿主 SDK 与日志协议分别验证：v2 synthetic fixture 通过不代表 `0.1.3-alpha.1` 宿主运行已验收。
 
 ## 功能
 
