@@ -167,11 +167,13 @@ export function modelPriceFromRates(
 ): ModelPrice {
   const cny = currency === 'cny' ? rates : convertPriceSet(rates, 'usd')
   const usd = currency === 'usd' ? rates : convertPriceSet(rates, 'cny')
-  const resolvedFlat = flat === true || (flat !== false && defaultCustomFlat(model))
+  const resolvedFlat = flat ?? defaultCustomFlat(model)
   return {
     cny,
     usd,
-    ...(resolvedFlat ? { flat: true } : {}),
+    // An explicit false is semantic: it opts a custom price into a scheme's
+    // peak/off-peak multiplier and must survive JSON persistence.
+    ...(flat !== undefined || resolvedFlat ? { flat: resolvedFlat } : {}),
   }
 }
 
@@ -196,11 +198,15 @@ export function parseCustomPrices(text: string): Record<string, ModelPrice> {
     }
     const id = normalizeModel(raw)
     if (id === '') throw new Error('custom price model id must be non-empty')
-    const resolvedFlat = entry.flat === true || (entry.flat !== false && defaultCustomFlat(id))
+    const hasFlat = Object.hasOwn(entry, 'flat')
+    if (hasFlat && typeof entry.flat !== 'boolean') {
+      throw new Error(`custom price for "${raw}" flat must be boolean when present`)
+    }
+    const resolvedFlat = hasFlat ? entry.flat as boolean : defaultCustomFlat(id)
     out[id] = {
       cny: cny ?? convertPriceSet(usd as PriceSet, 'usd'),
       usd: usd ?? convertPriceSet(cny as PriceSet, 'cny'),
-      ...(resolvedFlat ? { flat: true } : {}),
+      ...(hasFlat || resolvedFlat ? { flat: resolvedFlat } : {}),
     }
   }
   return out

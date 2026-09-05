@@ -187,6 +187,29 @@ describe('custom prices', () => {
     expect(parsed['claude-sonnet']!.flat).toBe(true)
   })
 
+  it('preserves an explicit flat:false through parse and serialization', () => {
+    const source = '{"gpt-4o":{"usd":{"miss":2.5,"hit":1.25,"output":10},"flat":false}}'
+    const first = parseCustomPrices(source)
+    expect(first['gpt-4o']!.flat).toBe(false)
+    const second = parseCustomPrices(serializeCustomPrices(first))
+    expect(second['gpt-4o']!.flat).toBe(false)
+
+    const schemes = withCustomPrices(PRICE_SCHEMES, second)
+    const offpeak = record({
+      model: 'gpt-4o',
+      inputTokens: 0,
+      outputTokens: 1_000_000,
+      time: Date.UTC(2026, 7, 17, 0, 0, 0),
+    })
+    expect(priceRecord(offpeak, schemes)!.costUsd).toBeCloseTo(5, 6)
+  })
+
+  it('rejects a non-boolean flat override', () => {
+    expect(() => parseCustomPrices(
+      '{"gpt-4o":{"usd":{"miss":2.5,"hit":1.25,"output":10},"flat":"false"}}',
+    )).toThrow('flat must be boolean')
+  })
+
   it('lists unpriced models in totalsFor', () => {
     const { priced, unpricedModels } = totalsFor([
       record({ model: 'deepseek-v4-flash' }),

@@ -12,6 +12,8 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 
 2026-08-28 update: retry boundaries now follow the official `llm/retry-started` event, official session-id directory encoding is supported, and the comparison with `0.1.2-alpha.1` is current. Ledger schema v3 automatically refolds existing v2 caches.
 
+2026-09-05 update: fixes ledger-directory creation on Windows paths; preserves an explicit `flat: false` custom price through the settings form and local file; and refreshes an existing stats-line cost marker when new cost data arrives.
+
 ## What it gives you
 
 - **Per-conversation view**: the session's total cost is embedded directly into the official stats line at the bottom of the conversation (right after `TTFT avg … · … tok/s`); clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).

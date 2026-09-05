@@ -22,6 +22,8 @@ interface DraftRow {
   miss: string
   hit: string
   output: string
+  /** Preserve an explicit flat:false through form edits and persistence. */
+  flat?: boolean
 }
 
 /** Props for the custom-price editor. */
@@ -53,6 +55,7 @@ function rowsFromText(text: string, currency: 'cny' | 'usd'): DraftRow[] {
         miss: String(set.miss),
         hit: String(set.hit),
         output: String(set.output),
+        ...(price.flat === undefined ? {} : { flat: price.flat }),
       }
     })
   } catch {
@@ -70,6 +73,7 @@ function rowsFromModels(models: ModelCatalogRow[], currency: 'cny' | 'usd'): Dra
       miss: String(set.miss),
       hit: String(set.hit),
       output: String(set.output),
+      ...(row.price.flat === undefined ? {} : { flat: row.price.flat }),
     }]
   })
 }
@@ -89,7 +93,7 @@ function serializeRows(rows: DraftRow[], currency: 'cny' | 'usd'): { text: strin
     if (!Number.isFinite(miss) || !Number.isFinite(hit) || !Number.isFinite(output) || miss < 0 || hit < 0 || output < 0) {
       return { text: serializeCustomPrices(custom), valid: false }
     }
-    custom[id] = modelPriceFromRates(model, { miss, hit, output }, currency)
+    custom[id] = modelPriceFromRates(model, { miss, hit, output }, currency, row.flat)
   }
   return { text: serializeCustomPrices(custom), valid: true }
 }
@@ -175,6 +179,7 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
     try {
       const parsed = parseCustomPrices(text)
       const next = rowsFromText(serializeCustomPrices(parsed), currency)
+      rowsRef.current = next
       setRows(next)
       const committed = serializeCustomPrices(parsed)
       setJsonError(false)

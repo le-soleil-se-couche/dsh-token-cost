@@ -52,6 +52,24 @@ describe('SessionLedger', () => {
     expect(ledger.session('session-abc')!.records[0]!.inputTokens).toBe(200)
   })
 
+  it('persists a ledger when the target filename has no explicit parent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'token-cost-ledger-persist-test-'))
+    const dir = join(root, '--tmp--', 'session-abc')
+    const previousCwd = process.cwd()
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(dir, { recursive: true })
+    copyFileSync(FIXTURE_A, join(dir, 'session.jsonl.zstd'))
+
+    process.chdir(root)
+    try {
+      const ledger = new SessionLedger(root, 'ledger.json')
+      expect(await ledger.sync()).toMatchObject({ sessionCount: 1, recordCount: 1 })
+      expect(readFileSync(join(root, 'ledger.json'), 'utf8')).toContain('"version":3')
+    } finally {
+      process.chdir(previousCwd)
+    }
+  })
+
   it('discovers opaque session directory names instead of assuming a session- prefix', async () => {
     const root = mkdtempSync(join(tmpdir(), 'token-cost-opaque-session-test-'))
     const dir = join(root, '--tmp--', 'opaque-fixture-id')

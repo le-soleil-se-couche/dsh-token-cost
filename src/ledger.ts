@@ -10,7 +10,7 @@
 
 import { decompress } from 'fzstd'
 import type { Dirent } from 'node:fs'
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { SessionMeta, UsageRecord } from './protocol.ts'
 import { parseSessionLog } from './parser.ts'
@@ -245,12 +245,10 @@ export class SessionLedger {
     const payload: LedgerFile = { version: LEDGER_VERSION, sessions }
     try {
       const text = JSON.stringify(payload)
-      const dir = this.ledgerPath.slice(0, Math.max(this.ledgerPath.lastIndexOf('/'), 0))
-      const { mkdirSync } = await import('node:fs')
-      mkdirSync(dir, { recursive: true })
+      const dir = dirname(this.ledgerPath)
+      await mkdir(dir, { recursive: true })
       const tmp = `${this.ledgerPath}.${process.pid}.tmp`
       await writeFile(tmp, text, 'utf8')
-      const { rename } = await import('node:fs/promises')
       await rename(tmp, this.ledgerPath)
     } catch (error) {
       console.warn('[dsh-token-cost] ledger persist failed:', error)
