@@ -10,11 +10,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionDetailResponse } from '../../protocol.ts'
 import { TokenCostApi } from '../api.ts'
 import { SessionDetailModal } from '../shared/SessionDetailModal.tsx'
-import { resolveSettings, useSettingsValue, type TokenCostSettings } from '../settings-schema.ts'
+import { resolveSettings, useSettingsValue, type TokenCostSettingsScope } from '../settings-schema.ts'
 import {
   formatCostText,
   publishCostState,
@@ -24,7 +23,7 @@ import {
 
 /** The bridge's injected share: the bound settings scope for currency. */
 export interface StatsCostBridgeFace {
-  settings: SettingsScope<TokenCostSettings>
+  settings: TokenCostSettingsScope
 }
 
 /** Full props the renderer binds for a composer.dock entry. */

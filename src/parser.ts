@@ -1,19 +1,11 @@
 /**
- * Pure parser for DSH session logs (the zstd-compressed JSONL event stream
- * under `$DSH_HOME/sessions/<cwd-slug>/<session-id>/session.jsonl.zstd`).
+ * Pure parser for DSH session logs.
  *
- * Billing-relevant events:
- * - `request/context` (`{provider, model}`) and `request/header`
- *   (`header.config.{provider, model}`) set the model of the current request;
- * - `assistant/chunk` with `chunk.type === 'usage'` reports per-step usage;
- * - `assistant/message` carries the final usage for the same turn/step.
- * - `llm/retry-started` is the canonical boundary between provider attempts;
- * - `compaction/summary.usage` reports an independent summarizer call.
- *
- * Within one provider attempt the LAST usage wins (message overrides its chunk
- * sample). A retry under the same (turn, step) adds another billable record.
- * Forked children count only their own events (`seq >= seedLength`) during
- * cross-session aggregation.
+ * Released v0/v1 logs keep provider chunks as top-level `assistant/chunk`
+ * events. Released v2 stores one settled attempt per `assistant/message` or
+ * `assistant/attempt`, with its exact provider stream embedded in `data.stream`.
+ * In every format the last usage sample inside one provider attempt wins, and
+ * `llm/retry-started` opens the next billable attempt for the same turn/step.
  */
 
 import type { SessionMeta, UsageRecord } from './protocol.ts'
@@ -23,129 +15,180 @@ export interface ParsedSession {
   records: UsageRecord[]
 }
 
+/** Session generations whose released accounting grammar this parser knows. */
+export const SUPPORTED_SESSION_FORMAT_VERSIONS = [0, 1, 2] as const
+type SupportedSessionFormatVersion = (typeof SUPPORTED_SESSION_FORMAT_VERSIONS)[number]
+
 /** Stable base key shared by every provider attempt of one loop step. */
 function stepKey(turn: number | undefined, step: number | undefined): string {
   return `${turn ?? 0}:${step ?? 0}`
 }
 
-/** Parse one session log text into meta + per-step usage records. */
-export function parseSessionLog(text: string, sessionId: string, fallbackCwd: string): ParsedSession {
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function supportedVersion(value: unknown): SupportedSessionFormatVersion {
+  if (value === 0 || value === 1 || value === 2) return value
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    throw new Error(`unsupported session format version v${value}`)
+  }
+  throw new Error('session header version must be a supported non-negative integer')
+}
+
+/**
+ * Return the last usage chunk in a released-v2 embedded Assistant stream.
+ * Packed text/reasoning/tool-call runs cannot carry usage; the official
+ * grammar keeps usage as `{type:'chunk', time, chunk:{type:'usage', usage}}`.
+ */
+function lastEmbeddedUsage(stream: unknown): Record<string, unknown> | undefined {
+  if (!Array.isArray(stream)) return undefined
+  let usage: Record<string, unknown> | undefined
+  for (const member of stream) {
+    const record = objectRecord(member)
+    if (record?.type !== 'chunk') continue
+    const chunk = objectRecord(record.chunk)
+    if (chunk?.type !== 'usage') continue
+    const sample = objectRecord(chunk.usage)
+    if (sample !== undefined) usage = sample
+  }
+  return usage
+}
+
+function messageRoute(data: Record<string, unknown> | undefined): {
+  provider?: string
+  model?: string
+} {
+  const message = objectRecord(data?.message)
+  const source = objectRecord(message?.source)
+  return {
+    ...(typeof source?.provider === 'string' && source.provider !== ''
+      ? { provider: source.provider }
+      : {}),
+    ...(typeof source?.model === 'string' && source.model !== ''
+      ? { model: source.model }
+      : {}),
+  }
+}
+
+/**
+ * Parse one complete session log into metadata and per-attempt usage records.
+ * `expectedVersion` is the generation encoded in the selected canonical
+ * filename; a mismatch refuses the artifact instead of silently reclassifying
+ * it or falling back to an older migrated copy.
+ */
+export function parseSessionLog(
+  text: string,
+  sessionId: string,
+  fallbackCwd: string,
+  expectedVersion?: number,
+): ParsedSession {
   let createdAt = 0
   let cwd = fallbackCwd
   let title = ''
   let lastActivity = 0
-  let provider = ''
-  let model = ''
-  let seedLength = 0
   let headerSeen = false
-  let eventCount = 0
-  const attemptByStep = new Map<string, number>()
-  const byAttempt = new Map<string, UsageRecord>()
-  const independent: UsageRecord[] = []
+  let formatVersion: SupportedSessionFormatVersion | undefined
+  let seedLength = 0
+  let v2IsSeeded = false
+  const events: Record<string, unknown>[] = []
 
   for (const raw of text.split('\n')) {
     const line = raw.trim()
     if (line === '') continue
     let event: Record<string, unknown>
     try {
-      event = JSON.parse(line) as Record<string, unknown>
+      const parsed = JSON.parse(line) as unknown
+      const record = objectRecord(parsed)
+      if (record === undefined) continue
+      event = record
     } catch {
       continue
     }
-    if (eventCount === 0 && event.type !== 'session') {
-      throw new Error('first session event must be a session header')
-    }
-    eventCount += 1
-    const time = typeof event.time === 'number' ? event.time : 0
-    const seq = typeof event.seq === 'number' ? event.seq : undefined
-    // A seeded child physically carries the parent's prefix. Metadata from the
-    // prefix may still establish the route/title, but its billable events belong
-    // to the parent and must not be emitted again for this session.
-    const ownsBillingEvent = seedLength === 0 || (seq !== undefined && seq >= seedLength)
-    if (time > lastActivity) lastActivity = time
-    switch (event.type) {
-      case 'session': {
-        // The session envelope carries createdAt/cwd at the top level.
-        if (headerSeen) throw new Error('session log contains more than one session header')
-        if (typeof event.id !== 'string' || event.id === '') {
-          throw new Error('session header id must be a non-empty string')
-        }
-        if (event.id !== sessionId) {
-          throw new Error(`session header id "${event.id}" does not match path id "${sessionId}"`)
-        }
-        headerSeen = true
-        if (typeof event.createdAt === 'number' && event.createdAt > 0) createdAt = event.createdAt
-        if (typeof event.cwd === 'string' && event.cwd !== '') cwd = event.cwd
+    if (!headerSeen) {
+      if (event.type !== 'session') throw new Error('first session event must be a session header')
+      if (typeof event.id !== 'string' || event.id === '') {
+        throw new Error('session header id must be a non-empty string')
+      }
+      if (event.id !== sessionId) {
+        throw new Error(`session header id "${event.id}" does not match path id "${sessionId}"`)
+      }
+      formatVersion = supportedVersion(event.version)
+      if (expectedVersion !== undefined && expectedVersion !== formatVersion) {
+        throw new Error(
+          `session filename identifies format v${expectedVersion}, but its header identifies v${formatVersion}`,
+        )
+      }
+      headerSeen = true
+      if (typeof event.createdAt === 'number' && event.createdAt > 0) createdAt = event.createdAt
+      if (typeof event.cwd === 'string' && event.cwd !== '') cwd = event.cwd
+      if (formatVersion < 2) {
         if (typeof event.seedLength === 'number'
           && Number.isSafeInteger(event.seedLength)
           && event.seedLength >= 0) {
           seedLength = event.seedLength
         }
-        break
-      }
-      case 'session/title': {
-        const data = event.data as Record<string, unknown> | undefined
-        if (typeof data?.title === 'string' && data.title !== '') title = data.title
-        break
-      }
-      case 'request/context': {
-        const data = event.data as Record<string, unknown> | undefined
-        if (typeof data?.model === 'string' && data.model !== '') {
-          model = data.model
-          if (typeof data.provider === 'string') provider = data.provider
+      } else {
+        if (typeof event.isSeeded !== 'boolean') {
+          throw new Error('session format v2 header is missing boolean isSeeded')
         }
-        break
+        v2IsSeeded = event.isSeeded
       }
-      case 'request/header': {
-        const header = (event.data as Record<string, unknown> | undefined)?.header as
-          | Record<string, unknown>
-          | undefined
-        const config = header?.config as Record<string, unknown> | undefined
-        if (typeof config?.model === 'string' && config.model !== '') {
-          model = config.model
-          if (typeof config.provider === 'string') provider = config.provider
-        }
-        break
-      }
-      case 'assistant/chunk': {
-        const data = event.data as Record<string, unknown> | undefined
-        const chunk = data?.chunk as Record<string, unknown> | undefined
-        if (!ownsBillingEvent) break
-        if (chunk?.type === 'usage') {
-          recordAttempt(data, chunk.usage, time)
-        }
-        break
-      }
-      case 'assistant/message': {
-        const data = event.data as Record<string, unknown> | undefined
-        if (!ownsBillingEvent || data?.usage === undefined) break
-        recordAttempt(data, data.usage, time)
-        break
-      }
-      case 'llm/retry-started': {
-        const data = event.data as Record<string, unknown> | undefined
-        if (!ownsBillingEvent) break
-        startRetry(data)
-        break
-      }
-      case 'compaction/summary': {
-        const data = event.data as Record<string, unknown> | undefined
-        if (!ownsBillingEvent || data?.usage === undefined) break
-        recordIndependent(data, data.usage, time, seq)
-        break
-      }
+      continue
     }
+    if (event.type === 'session') throw new Error('session log contains more than one session header')
+    events.push(event)
+    const time = typeof event.time === 'number'
+      ? event.time
+      : typeof event.time0 === 'number' ? event.time0 : 0
+    if (time > lastActivity) lastActivity = time
   }
 
-  if (!headerSeen) throw new Error('session log is missing its session header')
+  if (!headerSeen || formatVersion === undefined) {
+    throw new Error('session log is missing its session header')
+  }
 
-  function recordAttempt(
+  if (formatVersion === 2) {
+    let inheritedCut: number | undefined
+    for (const event of events) {
+      if (event.type !== 'session/end-seed') continue
+      const data = objectRecord(event.data)
+      if (data?.inherited !== true) continue
+      const seq = typeof event.seq === 'number' && Number.isSafeInteger(event.seq) && event.seq >= 0
+        ? event.seq
+        : undefined
+      if (seq === undefined) throw new Error('session format v2 inherited end-seed marker needs a valid seq')
+      inheritedCut = seq
+    }
+    if (v2IsSeeded && inheritedCut === undefined) {
+      throw new Error('session format v2 seeded header lacks an inherited end-seed marker')
+    }
+    if (!v2IsSeeded && inheritedCut !== undefined) {
+      throw new Error('session format v2 unseeded header contains an inherited end-seed marker')
+    }
+    seedLength = inheritedCut ?? 0
+  }
+
+  let provider = ''
+  let model = ''
+  const attemptByStep = new Map<string, number>()
+  const byAttempt = new Map<string, UsageRecord>()
+  const independent: UsageRecord[] = []
+
+  const ownsBillingEvent = (event: Record<string, unknown>): boolean => {
+    if (seedLength === 0) return true
+    return typeof event.seq === 'number' && event.seq >= seedLength
+  }
+
+  const recordAttempt = (
     data: Record<string, unknown> | undefined,
-    usage: unknown,
+    usage: Record<string, unknown> | undefined,
     time: number,
-  ): void {
-    const u = usage as Record<string, unknown> | undefined
-    if (u === undefined) return
+    route: { provider?: string; model?: string } = {},
+  ): void => {
+    if (usage === undefined) return
     const turn = typeof data?.turn === 'number' ? data.turn : 0
     const step = typeof data?.step === 'number' ? data.step : 0
     const base = stepKey(turn, step)
@@ -158,49 +201,104 @@ export function parseSessionLog(text: string, sessionId: string, fallbackCwd: st
       step,
       sessionId,
       sessionLabel: title !== '' ? title : sessionId,
-      provider: previous?.provider || provider || '',
-      model: previous?.model || model || '',
-      inputTokens: toCount(u.inputTokens, previous?.inputTokens),
-      cacheReadTokens: toCount(u.cacheReadTokens, previous?.cacheReadTokens),
-      cacheWriteTokens: toCount(u.cacheWriteTokens, previous?.cacheWriteTokens),
-      outputTokens: toCount(u.outputTokens, previous?.outputTokens),
-      reasoningTokens: toCount(u.reasoningTokens, previous?.reasoningTokens),
+      provider: previous?.provider || route.provider || provider || '',
+      model: previous?.model || route.model || model || '',
+      inputTokens: toCount(usage.inputTokens, previous?.inputTokens),
+      cacheReadTokens: toCount(usage.cacheReadTokens, previous?.cacheReadTokens),
+      cacheWriteTokens: toCount(usage.cacheWriteTokens, previous?.cacheWriteTokens),
+      outputTokens: toCount(usage.outputTokens, previous?.outputTokens),
+      reasoningTokens: toCount(usage.reasoningTokens, previous?.reasoningTokens),
     })
   }
 
-  function startRetry(data: Record<string, unknown> | undefined): void {
-    const turn = typeof data?.turn === 'number' ? data.turn : 0
-    const step = typeof data?.step === 'number' ? data.step : 0
-    const base = stepKey(turn, step)
-    const attempt = attemptByStep.get(base) ?? 0
-    attemptByStep.set(base, attempt + 1)
-  }
-
-  function recordIndependent(
-    data: Record<string, unknown> | undefined,
-    usage: unknown,
-    time: number,
-    seq: number | undefined,
-  ): void {
-    const u = usage as Record<string, unknown> | undefined
-    if (u === undefined) return
-    independent.push({
-      time,
-      // Compaction is outside the loop turn/step vocabulary. A negative turn
-      // plus its durable seq keeps the existing wire shape without colliding
-      // with ordinary step keys in the detail table.
-      turn: -1,
-      step: seq ?? independent.length,
-      sessionId,
-      sessionLabel: title !== '' ? title : sessionId,
-      provider: typeof data?.provider === 'string' ? data.provider : provider,
-      model: typeof data?.model === 'string' ? data.model : model,
-      inputTokens: toCount(u.inputTokens, undefined),
-      cacheReadTokens: toCount(u.cacheReadTokens, undefined),
-      cacheWriteTokens: toCount(u.cacheWriteTokens, undefined),
-      outputTokens: toCount(u.outputTokens, undefined),
-      reasoningTokens: toCount(u.reasoningTokens, undefined),
-    })
+  for (const event of events) {
+    const time = typeof event.time === 'number' ? event.time : 0
+    const seq = typeof event.seq === 'number' ? event.seq : undefined
+    const owned = ownsBillingEvent(event)
+    switch (event.type) {
+      case 'session/title': {
+        const data = objectRecord(event.data)
+        if (typeof data?.title === 'string' && data.title !== '') title = data.title
+        break
+      }
+      case 'request/context': {
+        const data = objectRecord(event.data)
+        if (typeof data?.model === 'string' && data.model !== '') {
+          model = data.model
+          if (typeof data.provider === 'string') provider = data.provider
+        }
+        break
+      }
+      case 'request/header': {
+        const header = objectRecord(objectRecord(event.data)?.header)
+        const config = objectRecord(header?.config)
+        if (typeof config?.model === 'string' && config.model !== '') {
+          model = config.model
+          if (typeof config.provider === 'string') provider = config.provider
+        }
+        break
+      }
+      case 'assistant/chunk': {
+        if (formatVersion === 2 || !owned) break
+        const data = objectRecord(event.data)
+        const chunk = objectRecord(data?.chunk)
+        if (chunk?.type === 'usage') recordAttempt(data, objectRecord(chunk.usage), time)
+        break
+      }
+      case 'assistant/message': {
+        if (!owned) break
+        const data = objectRecord(event.data)
+        if (formatVersion === 2) {
+          recordAttempt(
+            data,
+            objectRecord(data?.usage) ?? lastEmbeddedUsage(data?.stream),
+            time,
+            messageRoute(data),
+          )
+        } else {
+          recordAttempt(data, objectRecord(data?.usage), time)
+        }
+        break
+      }
+      case 'assistant/attempt': {
+        if (formatVersion !== 2 || !owned) break
+        const data = objectRecord(event.data)
+        recordAttempt(data, lastEmbeddedUsage(data?.stream), time)
+        break
+      }
+      case 'llm/retry-started': {
+        if (!owned) break
+        const data = objectRecord(event.data)
+        const turn = typeof data?.turn === 'number' ? data.turn : 0
+        const step = typeof data?.step === 'number' ? data.step : 0
+        const base = stepKey(turn, step)
+        attemptByStep.set(base, (attemptByStep.get(base) ?? 0) + 1)
+        break
+      }
+      case 'compaction/summary': {
+        if (!owned) break
+        const data = objectRecord(event.data)
+        const usage = objectRecord(data?.usage)
+        if (usage === undefined) break
+        independent.push({
+          time,
+          // Compaction is outside the loop turn/step vocabulary. A negative
+          // turn plus durable seq keeps the existing detail wire shape.
+          turn: -1,
+          step: seq ?? independent.length,
+          sessionId,
+          sessionLabel: title !== '' ? title : sessionId,
+          provider: typeof data?.provider === 'string' ? data.provider : provider,
+          model: typeof data?.model === 'string' ? data.model : model,
+          inputTokens: toCount(usage.inputTokens, undefined),
+          cacheReadTokens: toCount(usage.cacheReadTokens, undefined),
+          cacheWriteTokens: toCount(usage.cacheWriteTokens, undefined),
+          outputTokens: toCount(usage.outputTokens, undefined),
+          reasoningTokens: toCount(usage.reasoningTokens, undefined),
+        })
+        break
+      }
+    }
   }
 
   const records = [...byAttempt.values(), ...independent].sort((a, b) => a.time - b.time)

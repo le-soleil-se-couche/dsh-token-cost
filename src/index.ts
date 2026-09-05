@@ -1,6 +1,6 @@
 /**
  * dsh-token-cost — host half. Maintains the incremental usage ledger over
- * DSH session logs (`$DSH_HOME/sessions/<cwd>/<session-id>/session.jsonl.zstd`), serves the
+ * DSH session generations (`$DSH_HOME/sessions/<cwd>/<session-id>/session[.vN].jsonl[.zstd]`), serves the
  * /api/dsh-token-cost route family (status / summary / sessions / session /
  * resync), and owns the `token-cost` settings namespace (currency, pricing
  * scheme mode, custom prices, API key aliases). Everything rides official
@@ -8,7 +8,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -30,7 +30,21 @@ export const inject = ['webServer']
  * settings surface edits. Spelled here rather than imported: the browser
  * half spells the same value and must not depend on a Host package.
  */
-export const TOKEN_COST_SETTINGS_NAMESPACE = settingsNamespace('token-cost')
+export const TOKEN_COST_SETTINGS_NAMESPACE = 'token-cost'
+
+/** Settings owner subset common to DSH 0.1.2-rc.1 and 0.1.3-alpha.1. */
+interface CompatibleSettingsScope<T> {
+  get(): T
+  watch(callback: (next: T, previous: T) => void | Promise<void>): () => void
+}
+
+interface CompatibleSettingsProvider {
+  register<T>(
+    namespace: string,
+    schema: z<T>,
+    options?: { base?: Partial<T> },
+  ): CompatibleSettingsScope<T>
+}
 
 /** Plugin config, validated by the same-named schemastery schema. */
 export interface Config {
@@ -119,9 +133,22 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
 
-  installSettingsSection(ctx, TOKEN_COST_SETTINGS_NAMESPACE, Config, config ?? {}, {
-    setSource: (source) => { current = source },
-    onChange: rebuild,
+  // Both supported host generations expose SettingsProvider.register/watch.
+  // 0.1.3 moved the old top-level installSettingsSection helper onto the
+  // provider, so consuming the common owner seam avoids a missing ESM export.
+  ctx.inject(['settings'], (settingsCtx) => {
+    const settings = settingsCtx.settings as unknown as CompatibleSettingsProvider
+    const scope = settings.register(TOKEN_COST_SETTINGS_NAMESPACE, Config, { base: config ?? {} })
+    current = () => scope.get()
+    rebuild()
+    settingsCtx.effect(
+      () => scope.watch(() => { rebuild() }),
+      'dsh-token-cost: settings changes',
+    )
+    settingsCtx.effect(() => () => {
+      current = () => config ?? {}
+      rebuild()
+    }, 'dsh-token-cost: settings fallback')
   })
   rebuild()
   void priceStore.whenReady().then(() => { rebuild() })

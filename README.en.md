@@ -12,6 +12,8 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 
 2026-08-28 update: retry boundaries now follow the official `llm/retry-started` event, official session-id directory encoding is supported, and the comparison with `0.1.2-alpha.1` is current. Ledger schema v3 automatically refolds existing v2 caches.
 
+2026-09-05 source preview: this branch adds session format v2 reading and newer settings interfaces, with ledger schema v4. Full installation and runtime acceptance on the target `0.1.3-alpha.1` host remain incomplete, and some exact-version dependencies are unavailable. Tests against the older SDK do not establish target-host compatibility. Use `main` for normal installation; this branch is for compatibility review.
+
 ## What it gives you
 
 - **Per-conversation view**: the session's total cost is embedded directly into the official stats line at the bottom of the conversation (right after `TTFT avg … · … tok/s`); clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).
@@ -24,23 +26,25 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
   <img src="docs/screenshots/cost-detail.png" alt="Cost detail modal" width="80%">
 </p>
 
-- **Overall summary** (Settings > Plugin configuration > Web UI plugins > Token Cost): time-filtered totals with today / yesterday / last 7 days / last 30 days / this month / last month / custom (up to 30 days), grouped by model, session and day.
+- **Overall summary** (Settings > Plugins > Plugin configuration > Token Cost): time-filtered totals with today / yesterday / last 7 days / last 30 days / this month / last month / custom (up to 30 days), grouped by model, session and day.
 - **Pricing status**: peak windows shown and billed in UTC+8 (09:00–12:00, 14:00–18:00).
 - **Custom model prices**: Settings discovers unpriced models from the ledger, or you can add a model that has not been called yet. Enter per-1M cache-miss / cache-hit / output rates; **Add model** writes the local price file immediately (survives refresh) and history recalculates. Cache-hit may be left blank (billed as 0). Third-party models stay flat (DeepSeek peak/off-peak does not apply).
 
 ## Data source
 
-The plugin reads DSH's durable session logs (`$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.jsonl.zstd`; the raw session id is in the first-line header) and folds provider-reported usage into per-attempt billing records: the final message replaces the chunk sample within one attempt; only `llm/retry-started` separates adjacent attempts under the same turn/step, so a planned retry that never actually begins does not open another billing slot; official `compaction/summary.usage` is an independent call; and a forked child excludes inherited events whose `seq < seedLength`. A compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) caches parsed records; only changed logs are re-parsed, and an accounting-semantics upgrade invalidates stale ledger versions for an authoritative refold. Custom unit prices live beside it in `custom-prices.json`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
+The plugin reads DSH's durable session generations. Current v2 is `$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.v2.jsonl` (or `.zstd`); v1 `session.v1.jsonl(.zstd)` and v0 `session.jsonl(.zstd)` remain supported. Migration can retain several immutable generations for one session, so the plugin selects the highest canonical numeric generation exactly once and never settles migrated copies twice. If that highest generation is newer than supported v2, it warns and skips the session instead of falling back to stale bytes.
+
+For v0/v1, top-level `assistant/chunk` and `assistant/message` carry usage. For v2, `assistant/message.data.usage` wins, otherwise the last usage in `data.stream` is used; `assistant/attempt.data.stream` preserves failed or retried settlements. The v2 reader accepts the official packed text/reasoning/tool-call run grammar while usage remains a raw `chunk` record inside that stream. Values replace within one attempt; only `llm/retry-started` opens the next billing slot for the same turn/step. `compaction/summary.usage` remains an independent call. Fork exclusion uses v0/v1 `seedLength` or the last v2 `session/end-seed { inherited: true }` cut. The compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) only re-parses changed authoritative generations; ledger v4 invalidates older semantics. Custom prices live beside it in `custom-prices.json`, including an explicit `flat: false`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
 
 Token fields follow the harness convention: `inputTokens` = cache-miss prompt tokens, `cacheReadTokens` = cache-hit prompt tokens (disjoint; together they are the billed input).
 
 The upstream log remains the telemetry boundary: title generation, Web Search, interrupted calls, failed summaries, or other clients cannot be priced when they do not emit usage. The public synthetic fixture and its hand-computed expectations live in `tests/fixtures/usage-accounting/`.
 
-### Accounting differences versus DSH 0.1.2-alpha.1
+### Compatibility boundary with DSH 0.1.3-alpha.1
 
-The DSH `0.1.2-alpha.1` source snapshot is [`cd5ef81481`](https://github.com/deepseek-ai/deepseek-harness/commit/cd5ef8148158c3a752a658978873241fdf8e2bbc): `tokenUsage` has moved to `stateVersion: 2` and fixes same-step retry replacement through `llm/retry-started`. That official projection still folds only `assistant/chunk` and `assistant/message`, not the `compaction/summary.usage` already present in official logs; cross-session consumers must also continue to exclude the inherited prefix where `seq < seedLength`.
+This compatibility pass is based on the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. The settings card registers in the same official `settings.plugin.item` keyed slot used by that release, under Plugins > Plugin configuration.
 
-This plugin follows the official retry semantics and additionally covers `compaction/summary.usage` and fork `seedLength`, using ledger v3 to invalidate totals produced under older semantics. In the narrowly defined scope of settling usage that official DSH has already written to session logs, the plugin remains ahead of that official release. That does not make it a substitute for the official bill or recover usage that upstream never logged. A community proposal adds failed-summary usage to `compaction/end`, but that field has no official schema yet, so the plugin does not price unknown extension fields. See the [latest discussion](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18176363). The original four-bucket independent synthetic conformance result remains at [Discussion #1886](https://github.com/deepseek-ai/deepseek-harness/discussions/1886#discussioncomment-18141954), with additional targeted retry, compaction, and directory-encoding tests in this repository.
+The plugin continues to settle official `compaction/summary.usage` independently and excludes inherited fork prefixes from cross-session totals. It is not a substitute for a provider bill and cannot recover usage upstream never logged. Fields such as `compaction/end` still are not priced without an official usage schema. Repository tests use synthetic fixtures only; no real session log is published.
 
 ## Installation
 

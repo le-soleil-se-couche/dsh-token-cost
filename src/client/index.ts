@@ -2,17 +2,16 @@
  * Browser-half entry for the dsh-token-cost plugin — runs inside the dsh web
  * GUI. Registers the per-session cost chip in the composer dock (next to the
  * shipped Input/Output stats line) and the summary dashboard card in the
- * settings page's Web UI plugin group. Mounting problems are logged, never
- * thrown: an external plugin must not take the GUI down.
+ * official configurable-plugin settings tab. Mounting problems are logged,
+ * never thrown: an external plugin must not take the GUI down.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the locale namespace map and the slot registry merge.
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-// Type-only: pulls the conversation slot declarations (composer.dock) and the
-// settings-surface SlotMap members (settingsScope, web-ui.plugin.item).
+// Type-only: pulls the conversation slot declaration and settingsScope service.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { StatsCostBridge, type StatsCostBridgeFace } from './stats/StatsCostBridge.tsx'
@@ -34,12 +33,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
   interface SlotMap {
     /**
-     * The child slot the Web UI plugin group declares; this card registers
-     * into the group instead of the top-level `settings.plugin.item` list.
-     * Spelled here with the same shape so this package can register without
-     * depending on the sibling UI package.
+     * Official keyed card slot declared by dsh-client-ui-settings-plugins.
+     * Spelled structurally here so the browser bundle has no value dependency
+     * on the sibling package while still targeting its released contract.
      */
-    'web-ui.plugin.item': { kind: 'list'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
+    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
   }
 }
 
@@ -71,10 +69,9 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: (): StatsCostBridgeFace => ({ settings: scope }),
     }, StatsCostBridge)))
-    disposers.push(ctx.slots.inject('web-ui.plugin.item', () => ctx.slots.register({
-      name: 'web-ui.plugin.item',
-      id: 'token-cost',
-      order: 130,
+    disposers.push(ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+      name: 'settings.plugin.item',
+      key: TOKEN_COST_NS,
       locale: NS,
       inject: (): TokenCostSettingsCardFace => ({ settings: scope }),
     }, TokenCostSettingsCard)))

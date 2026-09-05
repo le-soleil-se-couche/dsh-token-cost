@@ -15,14 +15,16 @@ Token 用量 / 缓存命中 / 费用统计插件（DeepSeek Harness Web GUI）
 
 ## 2. 数据来源（关键设计）
 
-DSH 把每个会话的完整事件流持久化为 zstd 压缩 JSONL：
-`$DSH_HOME/sessions/<cwd-slug>/<session-id>/session.jsonl.zstd`。
+DSH 把每个会话的完整事件流持久化为 immutable JSONL generation：当前 v2 是
+`$DSH_HOME/sessions/<cwd-slug>/<session-id>/session.v2.jsonl(.zstd)`；插件也读取
+v1 `session.v1.jsonl(.zstd)` 与 v0 `session.jsonl(.zstd)`。同一目录只选择数字版本
+最高的 canonical generation，避免把迁移保留的多代文件重复计费。
 
 与计费相关的事件：
 
 - `request/context`：`{provider, model}` —— 每个请求一次，跟随其后的是该请求的 usage 事件
-- `assistant/chunk`（`chunk.type === 'usage'`）：`{inputTokens, outputTokens, cacheReadTokens, reasoningTokens}`
-- `assistant/message`：消息级最终 usage（与 chunk 同 turn/step，去重取最后值）
+- v0/v1 `assistant/chunk`（`chunk.type === 'usage'`）与 `assistant/message.data.usage`
+- v2 `assistant/message.data.usage`（缺失时取 embedded stream 最后 usage）与 `assistant/attempt.data.stream`
 - `session` / `session/title`：会话元信息（创建时间、cwd、标题）
 
 字段语义（dsh-llm-deepseek 的 mapUsage 注释确认）：
@@ -64,7 +66,7 @@ JSON 可覆盖/新增任意模型价格。配置页以表单编辑该字段：�
 
 ## 4. Host 半区（src/index.ts + ledger.ts + parser.ts + pricing.ts + routes.ts）
 
-- 服务注入：`webServer`、`settings`（installSettingsSection 注册命名空间 `token-cost`）
+- 服务注入：`webServer`；通过两代共有的 `SettingsProvider.register/watch` 可选绑定 `settings`，注册命名空间 `token-cost`
 - 路由（loopback 护栏，同 dsh-ssh）：
   - `GET /api/dsh-token-cost/status`：ledger 统计 + 当前方案/下次切换
   - `GET /api/dsh-token-cost/summary?from&to&tz`：汇总（总 token/费用、按模型、按会话、按日）；`tz` 为客户端 UTC 偏移分钟，byDay 按客户端本地日切分（跨零点/时区切换正确）
@@ -79,7 +81,7 @@ JSON 可覆盖/新增任意模型价格。配置页以表单编辑该字段：�
 - `conversation.composer.dock`（官方 list 槽，scope session，自带 sessionId/useProjection）：
   注册「费用芯片」——轮询单会话汇总，显示 `≈¥0.12 · 缓存 68%`；点击弹单会话明细
   （记录表：时间/模型/输入(命中+未命中)/输出/费用；底部合计 + 缓存命中率）
-- `web-ui.plugin.item`（dsh-web-ui-settings 声明的家族子槽）：设置卡片，三个 Tab
+- `settings.plugin.item`（官方 ui-settings-plugins 声明的 keyed 槽）：设置卡片，三个 Tab
   - 汇总：筛选条（7 种预设 + 自定义日期）+ 4 张统计卡（费用/输入/输出/缓存命中率）
     + 按模型表 + 按会话表 + 每日趋势表
   - 会话：全部会话列表（点击打开明细弹窗，同单会话视图）

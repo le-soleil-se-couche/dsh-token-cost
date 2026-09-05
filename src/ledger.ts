@@ -10,13 +10,21 @@
 
 import { decompress } from 'fzstd'
 import type { Dirent } from 'node:fs'
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import type { SessionMeta, UsageRecord } from './protocol.ts'
 import { parseSessionLog } from './parser.ts'
 
 /** Parser semantics version; a bump forces authoritative session-log refolding. */
-const LEDGER_VERSION = 3
+const LEDGER_VERSION = 4
+
+const SESSION_LOG_NAME = /^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/u
+
+interface SessionLog {
+  file: string
+  version: number
+  compression: 'none' | 'zstd'
+}
 
 /** One cached ledger entry. */
 interface LedgerEntry {
@@ -38,9 +46,29 @@ interface LedgerFile {
   sessions: Record<string, LedgerEntry>
 }
 
-/** Locate every session log under a sessions root: absolute file paths. */
-async function findSessionLogs(root: string): Promise<string[]> {
-  const files: string[] = []
+/** Parse one canonical immutable-generation filename. */
+function sessionLogFromEntry(dir: string, entry: Dirent): SessionLog | undefined {
+  if (!entry.isFile()) return undefined
+  const match = SESSION_LOG_NAME.exec(entry.name)
+  if (match === null) return undefined
+  const version = match[1] === undefined ? 0 : Number(match[1])
+  if (!Number.isSafeInteger(version)) return undefined
+  return {
+    file: join(dir, entry.name),
+    version,
+    compression: match[2] === '.zstd' ? 'zstd' : 'none',
+  }
+}
+
+/**
+ * Locate one authoritative generation per session directory. DSH retains old
+ * immutable files after migration, so selecting every matching file would
+ * double-count one session. The numerically highest canonical generation is
+ * authoritative even when it is newer than this plugin; the parser then
+ * refuses that unknown generation explicitly instead of falling back.
+ */
+async function findSessionLogs(root: string): Promise<SessionLog[]> {
+  const files: SessionLog[] = []
   let slugs: Dirent[]
   try {
     slugs = await readdir(root, { withFileTypes: true })
@@ -58,16 +86,42 @@ async function findSessionLogs(root: string): Promise<string[]> {
     }
     for (const session of sessions) {
       if (!session.isDirectory()) continue
-      const file = join(slugDir, session.name, 'session.jsonl.zstd')
-      files.push(file)
+      const sessionDir = join(slugDir, session.name)
+      let entries: Dirent[]
+      try {
+        entries = await readdir(sessionDir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      const generations = entries.flatMap((entry) => {
+        const generation = sessionLogFromEntry(sessionDir, entry)
+        return generation === undefined ? [] : [generation]
+      })
+      const highestVersion = generations.reduce<number | undefined>(
+        (highest, generation) => highest === undefined || generation.version > highest
+          ? generation.version
+          : highest,
+        undefined,
+      )
+      if (highestVersion === undefined) continue
+      const authoritative = generations.filter((generation) => generation.version === highestVersion)
+      if (authoritative.length !== 1) {
+        console.warn(
+          `[dsh-token-cost] skipped ambiguous session generation in ${sessionDir}: `
+          + authoritative.map((generation) => generation.file).join(', '),
+        )
+        continue
+      }
+      files.push(authoritative[0] as SessionLog)
     }
   }
-  return files.sort()
+  return files.sort((left, right) => left.file.localeCompare(right.file, 'en'))
 }
 
-/** Decompress a zstd frame and decode UTF-8. */
-async function readSessionText(file: string): Promise<string> {
-  const bytes = await readFile(file)
+/** Decode one selected raw or multi-frame-zstd session generation. */
+async function readSessionText(log: SessionLog): Promise<string> {
+  const bytes = await readFile(log.file)
+  if (log.compression === 'none') return bytes.toString('utf8')
   const decoded = decompress(new Uint8Array(bytes))
   return new TextDecoder().decode(decoded)
 }
@@ -116,7 +170,11 @@ function decodeSessionSegment(encoded: string): string {
 
 /** Session id decoded from the immediate parent directory of a session log. */
 export function sessionIdFromPath(file: string): string {
-  return decodeSessionSegment(basename(dirname(file)))
+  // Session directory names cannot contain a raw separator (unsafe code units
+  // are ~XXXX-encoded), so normalizing both platform separators is lossless.
+  const normalized = file.replaceAll('\\', '/')
+  const parent = normalized.slice(0, normalized.lastIndexOf('/'))
+  return decodeSessionSegment(parent.slice(parent.lastIndexOf('/') + 1))
 }
 
 /**
@@ -169,7 +227,8 @@ export class SessionLedger {
     const seen = new Set<string>()
     const claimed = new Map<string, string>()
     let changed = false
-    for (const file of files) {
+    for (const log of files) {
+      const { file } = log
       let id: string
       try {
         id = sessionIdFromPath(file)
@@ -202,8 +261,8 @@ export class SessionLedger {
       }
       let parsed: ReturnType<typeof parseSessionLog>
       try {
-        const text = await readSessionText(file)
-        parsed = parseSessionLog(text, id, '')
+        const text = await readSessionText(log)
+        parsed = parseSessionLog(text, id, '', log.version)
       } catch (error) {
         console.warn(`[dsh-token-cost] skipped invalid session log ${file}:`, error)
         continue
@@ -245,12 +304,10 @@ export class SessionLedger {
     const payload: LedgerFile = { version: LEDGER_VERSION, sessions }
     try {
       const text = JSON.stringify(payload)
-      const dir = this.ledgerPath.slice(0, Math.max(this.ledgerPath.lastIndexOf('/'), 0))
-      const { mkdirSync } = await import('node:fs')
-      mkdirSync(dir, { recursive: true })
+      const dir = dirname(this.ledgerPath)
+      await mkdir(dir, { recursive: true })
       const tmp = `${this.ledgerPath}.${process.pid}.tmp`
       await writeFile(tmp, text, 'utf8')
-      const { rename } = await import('node:fs/promises')
       await rename(tmp, this.ledgerPath)
     } catch (error) {
       console.warn('[dsh-token-cost] ledger persist failed:', error)

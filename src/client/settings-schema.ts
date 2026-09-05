@@ -4,9 +4,8 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 
-/** The namespace string both halves spell (settingsNamespace('token-cost')). */
+/** The namespace string both halves spell. */
 export const TOKEN_COST_NS = 'token-cost'
 
 /** Browser view of the settings section. */
@@ -19,6 +18,22 @@ export interface TokenCostSettings {
   priceMode?: 'auto' | 'scheme-a' | 'scheme-b'
   /** Custom model prices as JSON text; empty string = none. */
   customPrices?: string
+}
+
+/**
+ * Structural settings scope shared by DSH 0.1.2-rc.1 and 0.1.3-alpha.1.
+ * The owning package moved this type from dsh-client-runtime to
+ * dsh-client-ui-settings in 0.1.3; keeping the narrow consumer contract local
+ * avoids a runtime/package dependency on either type home.
+ */
+export interface TokenCostSettingsScope {
+  getSnapshot(): {
+    value: TokenCostSettings | undefined
+    writable: boolean
+  }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<void>
+  unset(field: string): Promise<void>
 }
 
 /** Resolved display facts with defaults applied. */
@@ -38,7 +53,7 @@ export function resolveSettings(value: TokenCostSettings | undefined): ResolvedS
 }
 
 /** Reactively read the current section value of a bound settings scope. */
-export function useSettingsValue(scope: SettingsScope<TokenCostSettings>): TokenCostSettings | undefined {
+export function useSettingsValue(scope: TokenCostSettingsScope): TokenCostSettings | undefined {
   const snapshot = useSyncExternalStore(
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),

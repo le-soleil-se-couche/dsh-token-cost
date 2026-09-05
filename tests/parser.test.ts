@@ -170,4 +170,125 @@ describe('parseSessionLog', () => {
       }),
     ])
   })
+
+  it('folds released-v2 embedded streams, packed runs, and retry boundaries', () => {
+    const log = [
+      {
+        type: 'session', version: 2, id: 'session-v2-retry', createdAt: 1,
+        cwd: '/fixture', isSeeded: false, delegationDepth: 0,
+      },
+      { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider-a', model: 'model-a' } },
+      {
+        type: 'assistant/attempt', seq: 1, time: 5, data: {
+          turn: 1,
+          step: 1,
+          stream: [
+            { type: 'text-chunks', time0: 2, index: 0, dt: [1], texts: ['a', 'b'] },
+            { type: 'chunk', time: 3, chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 1 } } },
+            { type: 'reasoning-chunks', time0: 3, index: 1, dt: [], texts: ['r'] },
+            { type: 'chunk', time: 4, chunk: { type: 'usage', usage: { inputTokens: 4, outputTokens: 2 } } },
+          ],
+        },
+      },
+      { type: 'llm/retry-started', seq: 2, time: 6, data: { retryId: 'retry-v2', turn: 1, step: 1, retry: 1 } },
+      { type: 'request/context', seq: 3, time: 7, data: { provider: 'provider-b', model: 'model-b' } },
+      {
+        type: 'assistant/message', seq: 4, time: 9, surfaceOp: 'append', data: {
+          turn: 1,
+          step: 1,
+          message: {
+            role: 'assistant', content: [],
+            source: { kind: 'model', provider: 'provider-message', model: 'model-message' },
+            id: 'message-v2',
+          },
+          usage: { inputTokens: 8, outputTokens: 5, cacheReadTokens: 13 },
+          stream: [
+            { type: 'tool-call-chunks', time0: 8, index: 0, dt: [], id: 'tool', name: 'read', args: ['{}'] },
+            { type: 'chunk', time: 8, chunk: { type: 'usage', usage: { inputTokens: 999, outputTokens: 999 } } },
+          ],
+        },
+      },
+    ].map((event) => JSON.stringify(event)).join('\n')
+
+    const records = parseSessionLog(log, 'session-v2-retry', '', 2).records
+    expect(records).toHaveLength(2)
+    expect(records[0]).toMatchObject({
+      provider: 'provider-a',
+      model: 'model-a',
+      inputTokens: 4,
+      outputTokens: 2,
+    })
+    expect(records[1]).toMatchObject({
+      provider: 'provider-message',
+      model: 'model-message',
+      inputTokens: 8,
+      outputTokens: 5,
+      cacheReadTokens: 13,
+    })
+  })
+
+  it('uses the last embedded v2 usage when assistant/message has no direct usage', () => {
+    const log = [
+      { type: 'session', version: 2, id: 'session-v2-stream', createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider', model: 'model' } },
+      {
+        type: 'assistant/message', seq: 1, time: 4, surfaceOp: 'append', data: {
+          turn: 1,
+          step: 1,
+          message: { role: 'assistant', content: [], source: { kind: 'model', provider: 'provider', model: 'model' }, id: 'm' },
+          stream: [
+            { type: 'chunk', time: 2, chunk: { type: 'usage', usage: { inputTokens: 5, outputTokens: 2 } } },
+            { type: 'chunk', time: 3, chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4 } } },
+          ],
+        },
+      },
+    ].map((event) => JSON.stringify(event)).join('\n')
+
+    expect(parseSessionLog(log, 'session-v2-stream', '', 2).records).toEqual([
+      expect.objectContaining({ inputTokens: 7, outputTokens: 4 }),
+    ])
+  })
+
+  it('excludes a v2 fork prefix using the last inherited end-seed marker', () => {
+    const log = [
+      {
+        type: 'session', version: 2, id: 'session-v2-child', createdAt: 1,
+        parentSession: 'parent', isSeeded: true, delegationDepth: 1,
+      },
+      { type: 'request/context', seq: 0, time: 1, data: { provider: 'parent-provider', model: 'parent-model' } },
+      {
+        type: 'assistant/message', seq: 1, time: 2, data: {
+          turn: 1, step: 1, message: { source: { kind: 'model', provider: 'parent-provider', model: 'parent-model' } },
+          usage: { inputTokens: 100, outputTokens: 10 }, stream: [],
+        },
+      },
+      { type: 'session/end-seed', seq: 2, time: 3, data: { inherited: true } },
+      { type: 'request/context', seq: 3, time: 4, data: { provider: 'child-provider', model: 'child-model' } },
+      {
+        type: 'assistant/message', seq: 4, time: 5, data: {
+          turn: 2, step: 1, message: { source: { kind: 'model', provider: 'child-provider', model: 'child-model' } },
+          usage: { inputTokens: 20, outputTokens: 5 }, stream: [],
+        },
+      },
+    ].map((event) => JSON.stringify(event)).join('\n')
+
+    const records = parseSessionLog(log, 'session-v2-child', '', 2).records
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ model: 'child-model', inputTokens: 20, outputTokens: 5 })
+  })
+
+  it('refuses unknown generations, filename/header mismatches, and malformed v2 seed metadata', () => {
+    expect(() => parseSessionLog(JSON.stringify({
+      type: 'session', version: 3, id: 'future', createdAt: 1,
+    }), 'future', '', 3)).toThrow('unsupported session format version v3')
+
+    expect(() => parseSessionLog(JSON.stringify({
+      type: 'session', version: 1, id: 'mismatch', createdAt: 1,
+    }), 'mismatch', '', 2)).toThrow('filename identifies format v2')
+
+    expect(() => parseSessionLog(JSON.stringify({
+      type: 'session', version: 2, id: 'seeded', createdAt: 1,
+      isSeeded: true, delegationDepth: 1,
+    }), 'seeded', '', 2)).toThrow('lacks an inherited end-seed marker')
+  })
 })

@@ -1,13 +1,12 @@
 /**
  * The dsh-token-cost settings card: the summary dashboard (time-filtered
  * totals, grouped tables), the per-session browser, and the pricing/alias
- * configuration. Registers into the `web-ui.plugin.item` slot the Web UI
- * plugin group renders inside the settings page.
+ * configuration. Registers into the official `settings.plugin.item` slot
+ * rendered in Settings > Plugins > Plugin configuration.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   CostGroupRow,
   ModelCatalogRow,
@@ -20,7 +19,7 @@ import { formatPeakWindows } from '../../pricing.ts'
 import { TokenCostApi } from '../api.ts'
 import { formatMoney, formatPercent, formatTokens } from '../format.ts'
 import type { TokenCostKey } from '../locales.ts'
-import { resolveSettings, useSettingsValue, type TokenCostSettings } from '../settings-schema.ts'
+import { resolveSettings, useSettingsValue, type TokenCostSettingsScope } from '../settings-schema.ts'
 import { SessionDetailModal } from '../shared/SessionDetailModal.tsx'
 import { presetRange, validCustomRange, type TimePreset } from '../time-filters.ts'
 import css from './card.module.css'
@@ -28,12 +27,12 @@ import { CustomPricesPanel } from './CustomPricesPanel.tsx'
 
 /** The card's injected share: the bound settings scope. */
 export interface TokenCostSettingsCardFace {
-  settings: SettingsScope<TokenCostSettings>
+  settings: TokenCostSettingsScope
 }
 
-/** Full props the renderer binds for the web-ui.plugin.item card. */
+/** Full props the renderer binds for the official configurable-plugin card. */
 export type TokenCostSettingsCardProps =
-  PropsRuntime<'web-ui.plugin.item'>
+  PropsRuntime<'settings.plugin.item'>
   & PropsLocale<'token-cost'>
   & InjectFace<TokenCostSettingsCardFace>
 
@@ -379,7 +378,7 @@ function SessionRow(props: {
 }
 
 /** Config tab: staged form over the settings scope plus pricing status. */
-function ConfigTab(props: TabProps & { scope: SettingsScope<TokenCostSettings> }) {
+function ConfigTab(props: TabProps & { scope: TokenCostSettingsScope }) {
   const { t, scope, api, currency } = props
   const raw = useSettingsValue(scope)
   const value = raw ?? {}

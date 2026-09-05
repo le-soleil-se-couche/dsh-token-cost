@@ -125,18 +125,16 @@ function applyInjection(
   const label = chinese ? '费用' : 'Cost'
   const group = document.createElement('span')
   group.setAttribute(COST_NODE_MARKER, 'group')
-  group.textContent = `${label} ${costText}`
-  // Click-through: open the session detail modal when the bridge is mounted.
-  if (state.sessionId !== undefined && openDetail !== null) {
-    group.style.cursor = 'pointer'
-    group.style.textDecoration = 'underline dotted'
-    group.title = '查看费用明细'
-    group.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      openDetail?.(state.sessionId as string)
-    })
-  }
+  updateGroup(group, costText, label, state)
+  // The handler resolves the current bridge state at click time. Poll updates
+  // can therefore update the existing marker in place without retaining a
+  // stale session id in an earlier closure.
+  group.addEventListener('click', (event) => {
+    if (current.sessionId === undefined || openDetail === null) return
+    event.preventDefault()
+    event.stopPropagation()
+    openDetail(current.sessionId)
+  })
   if (sep !== null && sep.textContent === '|' && sep.tagName === 'SPAN') {
     // The official separator before the cache-hit span now separates the
     // cost group; give the cache-hit group a cloned separator of its own.
@@ -146,6 +144,21 @@ function applyInjection(
   } else {
     anchor.before(group)
   }
+}
+
+/** Refresh the mutable facts of an already-inserted cost group. */
+function updateGroup(
+  group: HTMLElement,
+  costText: string,
+  label: string,
+  state: CostBridgeState,
+): void {
+  const text = `${label} ${costText}`
+  if (group.textContent !== text) group.textContent = text
+  const clickable = state.sessionId !== undefined && openDetail !== null
+  group.style.cursor = clickable ? 'pointer' : ''
+  group.style.textDecoration = clickable ? 'underline dotted' : ''
+  group.title = clickable ? '查看费用明细' : ''
 }
 
 let scheduled = 0
@@ -170,9 +183,15 @@ function applyNow(): void {
   const located = locateLine()
   if (located === null) return
   const { root, anchor } = located
-  const existing = anchor.previousElementSibling
-  if (existing !== null && existing.hasAttribute(COST_NODE_MARKER)) return
-  applyInjection(root, anchor, state.costText, lineIsChinese(root.textContent ?? ''), state)
+  const chinese = lineIsChinese(root.textContent ?? '')
+  const existing = root.querySelector<HTMLElement>(`[${COST_NODE_MARKER}="group"]`)
+  if (existing !== null) {
+    // Data can arrive without any host DOM mutation. Update the marker instead
+    // of treating its mere presence as proof that the displayed cost is fresh.
+    updateGroup(existing, state.costText, chinese ? '费用' : 'Cost', state)
+    return
+  }
+  applyInjection(root, anchor, state.costText, chinese, state)
 }
 
 let observer: MutationObserver | null = null
