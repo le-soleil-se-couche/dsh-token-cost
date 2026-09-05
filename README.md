@@ -16,7 +16,7 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 2026-08-28 更新：retry 边界与官方 `llm/retry-started` 对齐，补充官方 session id 目录编码兼容，并刷新与 `0.1.2-alpha.1` 的差异说明。账本 schema 升至 v3，已有 v2 缓存会自动重折叠。
 
-2026-09-05 源码预览：本分支增加 session format v2 读取与新版设置接口适配，账本 schema 为 v4。目标 `0.1.3-alpha.1` 宿主的完整安装和运行尚未通过验收，部分精确版本依赖尚不可安装；旧 SDK 下的测试不能替代该验收。日常安装请使用 `main`，本分支仅供适配审阅。
+2026-09-05 更新：本版本使用官方 npm `0.1.2-rc.1` SDK，直接消费官方设置与插件卡片类型；同时增加 session format v2 读取，账本 schema 为 v4。宿主 SDK 与日志协议分别验证：v2 synthetic fixture 通过不代表 `0.1.3-alpha.1` 宿主运行已验收。
 
 ## 功能
 
@@ -44,9 +44,11 @@ Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cac
 
 统计边界仍由上游日志决定：标题生成、Web Search、被中断调用、失败摘要或其他客户端若没有写出 usage，插件不会虚构 token 或费用。可公开复核的 synthetic fixture 与手算结果位于 `tests/fixtures/usage-accounting/`。
 
-### 与 DSH 0.1.3-alpha.1 的兼容边界
+### 支持版本与日志协议边界
 
-本次兼容依据 DSH `0.1.3-alpha.1` 的固定源码快照 [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215)：session format v2 将每次 Assistant settlement 写为携带嵌入 stream 的 `assistant/message` 或 `assistant/attempt`，当前 generation 使用 `session.v2.jsonl(.zstd)`；迁移留下的 v0/v1 文件不是额外调用。设置卡注册到该版本仍在使用的官方 `settings.plugin.item` keyed slot，位置保持在 Plugins 的 Plugin configuration tab。
+声明的宿主与浏览器 SDK 版本为官方 npm `0.1.2-rc.1`，编译依赖固定到该版本。设置 namespace 使用 `@deepseek-ai/dsh-settings` 的原生 `register` / `watch`，浏览器 scope 和卡片 slot 分别来自官方 `dsh-client-ui-settings/client` 与 `dsh-client-ui-settings-plugins/client`。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
+
+v2 日志读取依据 DSH `0.1.3-alpha.1` 的固定源码快照 [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215)：session format v2 将每次 Assistant settlement 写为携带嵌入 stream 的 `assistant/message` 或 `assistant/attempt`，当前 generation 使用 `session.v2.jsonl(.zstd)`；迁移留下的 v0/v1 文件不是额外调用。`0.1.3-alpha.1` 宿主的完整安装与运行尚未验收；其版本不在本包声明的 peer 支持范围中。
 
 本插件继续单独结算官方已经写入日志的 `compaction/summary.usage`，并在跨 session 汇总中排除 fork 继承前缀。这不代表插件能替代官方账单，也不扩大上游没有记录 usage 的遥测边界。`compaction/end` 等没有官方 usage schema 的字段仍不换算为费用；仓库测试只使用 synthetic fixture，不发布真实 session log。
 
@@ -56,7 +58,7 @@ Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cac
 dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 ```
 
-重启 `dsh web` 后，在设置页展开「Web UI 插件」即可看到。历史会话日志在首次查询时自动回填。
+使用官方 `@deepseek-ai/dsh@0.1.2-rc.1` 宿主。安装与重启会修改指定 profile；重启其 `dsh web` 后，在设置 > 插件 > 插件配置中打开「Token 费用统计」。历史会话日志在首次查询时自动回填。已在 macOS 的独立官方宿主中验证插件设置入口、合成日志费用汇总、自定义单价保存及币种设置重启保留；真实模型回合和其他平台仍需单独验证。
 
 ## 配置项
 
@@ -72,10 +74,16 @@ dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 ## 开发
 
 ```sh
-pnpm install && pnpm -r build
-pnpm --filter @deepseek-ai/dsh-token-cost test
-pnpm --filter @deepseek-ai/dsh-token-cost typecheck
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm pack
 ```
+
+开发基线为 Node.js `22.22.1` 和 pnpm `9.15.9`。Git 安装的 `prepare` 会同时生成 JavaScript 与声明文件。源码 checkout 保留 `src/`、`build/`、测试和锁文件；安装包只携带 `lib/`、bundle patch 与双语说明。宿主入口为 `lib/index.js`，浏览器入口为 `lib/client.js`（`window.__ModuleLoader__.load` factory），声明入口为 `lib/types/index.d.ts` 与 `lib/types/client/index.d.ts`。打包前可通过 `npm pack --dry-run --ignore-scripts` 检查清单。
+
+本地构建后可用 `dsh plugin --profile web add link:/absolute/path/to/dsh-token-cost` 安装到指定 profile。安装和重启会修改该 profile，请选择自己的开发 profile。
 
 架构说明见 DESIGN.md。
 

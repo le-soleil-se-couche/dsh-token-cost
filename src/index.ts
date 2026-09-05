@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import z from 'schemastery'
+import z from '@deepseek-ai/schemastery'
 import { SessionLedger } from './ledger.ts'
 import { CustomPriceStore } from './price-store.ts'
 import { PRICE_SCHEMES, parseCustomPrices, withCustomPrices } from './pricing.ts'
@@ -31,20 +31,6 @@ export const inject = ['webServer']
  * half spells the same value and must not depend on a Host package.
  */
 export const TOKEN_COST_SETTINGS_NAMESPACE = 'token-cost'
-
-/** Settings owner subset common to DSH 0.1.2-rc.1 and 0.1.3-alpha.1. */
-interface CompatibleSettingsScope<T> {
-  get(): T
-  watch(callback: (next: T, previous: T) => void | Promise<void>): () => void
-}
-
-interface CompatibleSettingsProvider {
-  register<T>(
-    namespace: string,
-    schema: z<T>,
-    options?: { base?: Partial<T> },
-  ): CompatibleSettingsScope<T>
-}
 
 /** Plugin config, validated by the same-named schemastery schema. */
 export interface Config {
@@ -133,12 +119,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
 
-  // Both supported host generations expose SettingsProvider.register/watch.
-  // 0.1.3 moved the old top-level installSettingsSection helper onto the
-  // provider, so consuming the common owner seam avoids a missing ESM export.
+  // Use the released SDK owner handle so registration and observation stay
+  // checked against the host's schema and lifecycle contract.
   ctx.inject(['settings'], (settingsCtx) => {
-    const settings = settingsCtx.settings as unknown as CompatibleSettingsProvider
-    const scope = settings.register(TOKEN_COST_SETTINGS_NAMESPACE, Config, { base: config ?? {} })
+    const scope = settingsCtx.settings.register(TOKEN_COST_SETTINGS_NAMESPACE, Config, { base: config ?? {} })
     current = () => scope.get()
     rebuild()
     settingsCtx.effect(

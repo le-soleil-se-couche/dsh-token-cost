@@ -11,9 +11,14 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the locale namespace map and the slot registry merge.
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: renderer owns ctx.slots; session owns the sessionId standard prop.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls the conversation slot declaration and settingsScope service.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: the official keyed settings-card slot belongs to its declarer.
+import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { StatsCostBridge, type StatsCostBridgeFace } from './stats/StatsCostBridge.tsx'
 import { en, zh, type TokenCostKey } from './locales.ts'
 import {
@@ -30,25 +35,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** dsh-token-cost surface copy. */
     'token-cost': TokenCostKey
   }
-
-  interface SlotMap {
-    /**
-     * Official keyed card slot declared by dsh-client-ui-settings-plugins.
-     * Spelled structurally here so the browser bundle has no value dependency
-     * on the sibling package while still targeting its released contract.
-     */
-    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
-  }
-}
-
-/** Owner share of a plugin card (the section supplies nothing). */
-export interface SettingsPluginItemOwnerProps {
-  /** Marker field: card owner props are intentionally empty. */
-  children?: never
 }
 
 /** Required services (fiber inject waiting — the runtime must be up first). */
-export const inject = ['slots', 'locale', 'connection', 'settingsScope', 'remote']
+export const inject = ['slots', 'locale', 'settingsScope']
 
 /**
  * Mount the two dsh-token-cost surfaces: the composer-dock chip and the

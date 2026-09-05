@@ -12,7 +12,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI â
 
 2026-08-28 update: retry boundaries now follow the official `llm/retry-started` event, official session-id directory encoding is supported, and the comparison with `0.1.2-alpha.1` is current. Ledger schema v3 automatically refolds existing v2 caches.
 
-2026-09-05 source preview: this branch adds session format v2 reading and newer settings interfaces, with ledger schema v4. Full installation and runtime acceptance on the target `0.1.3-alpha.1` host remain incomplete, and some exact-version dependencies are unavailable. Tests against the older SDK do not establish target-host compatibility. Use `main` for normal installation; this branch is for compatibility review.
+2026-09-05 update: this release uses the official npm `0.1.2-rc.1` SDK and its native settings and plugin-card types. It also reads session format v2, with ledger schema v4. Host SDK compatibility and log protocol support are verified separately: passing v2 synthetic fixtures does not establish runtime acceptance on a `0.1.3-alpha.1` host.
 
 ## What it gives you
 
@@ -40,9 +40,11 @@ Token fields follow the harness convention: `inputTokens` = cache-miss prompt to
 
 The upstream log remains the telemetry boundary: title generation, Web Search, interrupted calls, failed summaries, or other clients cannot be priced when they do not emit usage. The public synthetic fixture and its hand-computed expectations live in `tests/fixtures/usage-accounting/`.
 
-### Compatibility boundary with DSH 0.1.3-alpha.1
+### Supported SDK and log protocol boundary
 
-This compatibility pass is based on the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. The settings card registers in the same official `settings.plugin.item` keyed slot used by that release, under Plugins > Plugin configuration.
+The declared host and browser SDK version is official npm `0.1.2-rc.1`, with development dependencies pinned to that version. The settings namespace uses the native `register` / `watch` contract from `@deepseek-ai/dsh-settings`; browser scope and card-slot types come from `dsh-client-ui-settings/client` and `dsh-client-ui-settings-plugins/client`. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
+
+The v2 reader follows the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. Full installation and runtime acceptance on a `0.1.3-alpha.1` host remain incomplete; that host version is outside this package's declared peer range.
 
 The plugin continues to settle official `compaction/summary.usage` independently and excludes inherited fork prefixes from cross-session totals. It is not a substitute for a provider bill and cannot recover usage upstream never logged. Fields such as `compaction/end` still are not priced without an official usage schema. Repository tests use synthetic fixtures only; no real session log is published.
 
@@ -52,7 +54,7 @@ The plugin continues to settle official `compaction/summary.usage` independently
 dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 ```
 
-Restart `dsh web`, open the settings page and expand "Web UI plugins". The plugin reads usage starting from the first query â€” existing session logs are backfilled automatically.
+Use the official `@deepseek-ai/dsh@0.1.2-rc.1` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open Settings > Plugins > Plugin configuration > Token Cost. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
 
 ## Configuration
 
@@ -68,10 +70,16 @@ All editable from the card's Settings tab; a "Rescan session logs" action forces
 ## Development
 
 ```sh
-pnpm install && pnpm -r build
-pnpm --filter @deepseek-ai/dsh-token-cost test
-pnpm --filter @deepseek-ai/dsh-token-cost typecheck
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm pack
 ```
+
+The development baseline is Node.js `22.22.1` and pnpm `9.15.9`. Git installation runs `prepare` to build both JavaScript and declarations. The source checkout includes `src/`, `build/`, tests, and the lockfile; the install archive contains `lib/`, the bundle patch, and both READMEs. Entries are `lib/index.js` for the host and `lib/client.js` for the browser (`window.__ModuleLoader__.load` factory), with declarations at `lib/types/index.d.ts` and `lib/types/client/index.d.ts`. Use `npm pack --dry-run --ignore-scripts` to inspect the package file list after building.
+
+After a local build, install with `dsh plugin --profile web add link:/absolute/path/to/dsh-token-cost`. Installation and restart modify that profile, so select your own development profile.
 
 See DESIGN.md for the architecture.
 

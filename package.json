@@ -11,15 +11,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
-    "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -30,6 +25,8 @@
       "inject": [
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-settings-plugins"
@@ -38,21 +35,29 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsdown",
-    "prepare": "tsdown",
+    "build": "tsdown --clean && tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
     "watch": "tsdown --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-client-ui-settings-plugins": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6 || ^0.1.2-rc.1 || ^0.1.3-alpha.1",
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-scope": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -60,36 +65,39 @@
     "fzstd": "^0.1.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-scope": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "3.18.2",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.5",
     "jsdom": "29.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "schemastery": "^3.18.0",
     "tsdown": "0.22.2",
     "typescript": "~5.7.2",
     "vitest": "^4.1.8",
     "lightningcss": "1.32.0"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
-    "lib/types/**/*.d.ts",
-    "lib/types/**/*.d.ts.map",
-    "src",
+    "lib",
     "cordis.patch.yml",
     "README.md",
-    "README.zh.md"
+    "README.en.md"
   ],
+  "packageManager": "pnpm@9.15.9",
   "license": "BSD-3-Clause"
 }
