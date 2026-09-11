@@ -145,6 +145,19 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
     emit([...rows, { key: `new-${nextRowKey++}`, model, miss: '', hit: '', output: '' }], false)
   }
 
+  /** Seed an override draft from a built-in row's current (latest) rates. */
+  const overrideBuiltin = (row: ModelCatalogRow): void => {
+    if (drafted.has(normalizeModel(row.model))) return
+    const set = row.price === null ? undefined : currency === 'cny' ? row.price.cny : row.price.usd
+    emit([...rows, {
+      key: `new-${nextRowKey++}`,
+      model: row.model,
+      miss: set === undefined ? '' : String(set.miss),
+      hit: set === undefined ? '' : String(set.hit),
+      output: set === undefined ? '' : String(set.output),
+    }], false)
+  }
+
   const addReady = addModel.trim() !== ''
     && Number.isFinite(parseRate(addMiss))
     && Number.isFinite(parseRate(addOutput))
@@ -287,7 +300,7 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
                           className={css.rowBtn}
                           onClick={() => { emit(rows.filter((item) => item.key !== row.key), true) }}
                         >
-                          {t('config.removePrice')}
+                          {overridesBuiltin ? t('config.resetBuiltin') : t('config.removePrice')}
                         </button>
                       </td>
                     </tr>
@@ -350,6 +363,7 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
       {builtinRows.length > 0 ? (
         <details className={css.priceSection}>
           <summary className={css.groupTitle}>{t('config.builtinTitle')}</summary>
+          <div className={css.fieldHint}>{t('config.overrideHint')}</div>
           <div className={css.tableWrap}>
             <table className={css.table}>
               <thead>
@@ -359,6 +373,7 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
                   <th className={css.num}>{t('config.priceHit')}</th>
                   <th className={css.num}>{t('config.priceOutput')}</th>
                   <th className={css.num}>{t('table.requests')}</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -374,6 +389,11 @@ export function CustomPricesPanel(props: CustomPricesPanelProps) {
                       <td className={css.num}>{set?.hit ?? t('common.na')}</td>
                       <td className={css.num}>{set?.output ?? t('common.na')}</td>
                       <td className={css.num}>{row.records}</td>
+                      <td>
+                        <button type="button" className={css.rowBtn} onClick={() => { overrideBuiltin(row) }}>
+                          {t('config.overrideAction')}
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
