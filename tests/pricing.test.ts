@@ -9,6 +9,7 @@ import {
   PEAK_WORKDAYS,
   PRICE_SCHEMES,
   SCHEME_B_EFFECTIVE_FROM,
+  SCHEME_B_WEEKDAYS_EFFECTIVE_FROM,
   SCHEME_C_EFFECTIVE_FROM,
   SCHEME_D_EFFECTIVE_FROM,
   convertPriceSet,
@@ -58,10 +59,15 @@ describe('resolveScheme', () => {
   })
 
   it('switches to scheme-c at the 2026-09-10 12:00 Beijing price cut', () => {
-    expect(resolveScheme(PRICE_SCHEMES, SCHEME_C_EFFECTIVE_FROM - 1).id).toBe('scheme-b')
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_C_EFFECTIVE_FROM - 1).id).toBe('scheme-b-weekdays')
     expect(resolveScheme(PRICE_SCHEMES, SCHEME_C_EFFECTIVE_FROM).id).toBe('scheme-c')
     expect(resolveScheme(PRICE_SCHEMES, SCHEME_D_EFFECTIVE_FROM - 1).id).toBe('scheme-c')
     expect(resolveScheme(PRICE_SCHEMES, SCHEME_D_EFFECTIVE_FROM).id).toBe('scheme-d')
+  })
+
+  it('switches weekend billing policy at 2026-08-23 00:00 Beijing', () => {
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_B_WEEKDAYS_EFFECTIVE_FROM - 1).id).toBe('scheme-b')
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_B_WEEKDAYS_EFFECTIVE_FROM).id).toBe('scheme-b-weekdays')
   })
 })
 
@@ -84,10 +90,22 @@ describe('isPeakHour', () => {
     expect(isPeakHour(schemeB, Date.UTC(2026, 7, 17, 1, 0, 0))).toBe(true)
   })
 
-  it('keeps scheme-b peak windows on weekends (every day)', () => {
-    // Saturday 2026-08-22 10:00 Beijing.
+  it('keeps scheme-b weekend peak windows before the 2026-08-23 policy change', () => {
+    // Saturday 2026-08-22 10:00 Beijing, before the later policy takes effect.
     expect(isPeakHour(schemeB, Date.UTC(2026, 7, 22, 2, 0, 0))).toBe(true)
     expect(peakLimitsWeekdays(schemeB)).toBe(false)
+  })
+
+  it('makes weekend peak-window hours off-peak from 2026-08-23', () => {
+    const schemeBWeekdays = PRICE_SCHEMES.find((scheme) => scheme.id === 'scheme-b-weekdays')!
+    expect(schemeBWeekdays.peakDays).toEqual(PEAK_WORKDAYS)
+    expect(peakLimitsWeekdays(schemeBWeekdays)).toBe(true)
+    // Sunday 8/23, Saturday 8/29, and Sunday 9/6 at 10:00 Beijing are off-peak.
+    for (const time of [Date.UTC(2026, 7, 23, 2, 0, 0), Date.UTC(2026, 7, 29, 2, 0, 0), Date.UTC(2026, 8, 6, 2, 0, 0)]) {
+      expect(isPeakHour(schemeBWeekdays, time)).toBe(false)
+    }
+    // Monday 2026-08-24 10:00 Beijing remains peak.
+    expect(isPeakHour(schemeBWeekdays, Date.UTC(2026, 7, 24, 2, 0, 0))).toBe(true)
   })
 
   it('restricts scheme-c peak windows to workdays', () => {
@@ -135,6 +153,25 @@ describe('priceRecord', () => {
     expect(priceRecord(peak, PRICE_SCHEMES)!.costCny).toBeCloseTo(9, 6)
     expect(priceRecord(peak, PRICE_SCHEMES)!.peak).toBe(true)
     expect(priceRecord(offpeak, PRICE_SCHEMES)!.peak).toBe(false)
+  })
+
+  it('bills weekend peak-window requests at off-peak rates from 2026-08-23', () => {
+    const beforePolicy = priceRecord(record({ time: Date.UTC(2026, 7, 22, 2, 0, 0) }), PRICE_SCHEMES)!
+    expect(beforePolicy.schemeId).toBe('scheme-b')
+    expect(beforePolicy.costCny).toBeCloseTo(3, 6)
+    expect(beforePolicy.peak).toBe(true)
+
+    for (const time of [Date.UTC(2026, 7, 23, 2, 0, 0), Date.UTC(2026, 7, 29, 2, 0, 0), Date.UTC(2026, 8, 6, 2, 0, 0)]) {
+      const cost = priceRecord(record({ time }), PRICE_SCHEMES)!
+      expect(cost.schemeId).toBe('scheme-b-weekdays')
+      expect(cost.costCny).toBeCloseTo(1.5, 6)
+      expect(cost.peak).toBe(false)
+    }
+
+    const weekday = priceRecord(record({ time: Date.UTC(2026, 7, 24, 2, 0, 0) }), PRICE_SCHEMES)!
+    expect(weekday.schemeId).toBe('scheme-b-weekdays')
+    expect(weekday.costCny).toBeCloseTo(3, 6)
+    expect(weekday.peak).toBe(true)
   })
 
   it('keeps legacy models flat inside scheme-b', () => {

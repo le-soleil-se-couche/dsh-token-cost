@@ -14,7 +14,7 @@
  *   deepseek-chat      cny miss 2 / hit 0.5 / out 8       usd 0.27 / 0.07 / 1.10   (legacy flat)
  *   deepseek-reasoner  cny miss 4 / hit 1 / out 16        usd 0.55 / 0.14 / 2.19   (legacy flat)
  *
- * Scheme B (peak/off-peak, from 2026-08-16T16:00Z = 2026-08-17 00:00 Beijing):
+ * Scheme B (peak/off-peak, 2026-08-16T16:00Z until 2026-08-22T16:00Z):
  *   peak hours Beijing 09:00-12:00 and 14:00-18:00 every day (UTC+8); off-peak
  *   bills half.
  *   deepseek-v4-flash  peak cny miss 3 / hit 0.10 / out 9     usd 0.44 / 0.014 / 1.32
@@ -22,9 +22,14 @@
  *   deepseek-v4-pro    peak cny miss 9 / hit 0.30 / out 27    usd 1.32 / 0.044 / 3.96
  *   legacy models keep their flat prices (not covered by the announcement).
  *
+ * Scheme B-weekdays (same prices, from 2026-08-22T16:00Z = 2026-08-23 00:00 Beijing):
+ *   weekdays retain the peak windows; Saturday and Sunday bill off-peak all day.
+ *   This historical start instant follows the cited announcement in PR #2:
+ *   https://github.com/le-soleil-se-couche/dsh-token-cost/pull/2. The current
+ *   API pricing page confirms the weekday-only rule but does not archive that date.
+ *
  * Scheme C (V4.1 Flash price cut, from 2026-09-10T04:00Z = 12:00 Beijing):
- *   peak windows unchanged but restricted to workdays, Monday-Friday
- *   (announced 2026-09-09; previously every day).
+ *   peak windows and weekday-only policy continue unchanged.
  *   deepseek-flash     peak cny miss 2 / hit 0.04 / out 8     usd 0.30 / 0.006 / 1.20
  *   deepseek-v4-flash, deepseek-v4-flash-vision-exp
  *                      same Flash price: the retired models are routed to
@@ -42,6 +47,9 @@ import type { ModelPrice, PriceScheme, PriceSet, UsageRecord } from './protocol.
 
 /** UTC instant the peak/off-peak scheme starts billing. */
 export const SCHEME_B_EFFECTIVE_FROM = Date.UTC(2026, 7, 16, 16, 0, 0)
+
+/** Weekend all-off-peak policy starts per the cited announcement in PR #2 (00:00 Beijing). */
+export const SCHEME_B_WEEKDAYS_EFFECTIVE_FROM = Date.UTC(2026, 7, 22, 16, 0, 0)
 
 /** UTC instant the V4.1 Flash price cut starts billing (12:00 Beijing). */
 export const SCHEME_C_EFFECTIVE_FROM = Date.UTC(2026, 8, 10, 4, 0, 0)
@@ -85,6 +93,12 @@ export function convertPriceSet(set: PriceSet, from: 'cny' | 'usd'): PriceSet {
   }
 }
 
+/** Peak rates of V4 Flash (2026-08-17); off-peak bills half. */
+const V4_FLASH_PEAK: ModelPrice = {
+  cny: { miss: 3, hit: 0.1, output: 9 },
+  usd: { miss: 0.44, hit: 0.014, output: 1.32 },
+}
+
 /** Peak rates of V4.1 Flash (2026-09-10); off-peak bills half. */
 const V41_FLASH_PEAK: ModelPrice = {
   cny: { miss: 2, hit: 0.04, output: 8 },
@@ -108,6 +122,15 @@ const LEGACY_REASONER_FLAT: ModelPrice = {
   cny: { miss: 4, hit: 1, output: 16 },
   usd: { miss: 0.55, hit: 0.14, output: 2.19 },
   flat: true,
+}
+
+/** Shared model prices for the 2026-08 peak/off-peak schemes. */
+const V4_PEAK_MODELS: Record<string, ModelPrice> = {
+  'deepseek-v4-flash': V4_FLASH_PEAK,
+  'deepseek-v4-flash-vision-exp': V4_FLASH_PEAK,
+  'deepseek-v4-pro': V4_PRO_PEAK,
+  'deepseek-chat': LEGACY_CHAT_FLAT,
+  'deepseek-reasoner': LEGACY_REASONER_FLAT,
 }
 
 /** The built-in catalog: newest last. */
@@ -146,30 +169,19 @@ export const PRICE_SCHEMES: PriceScheme[] = [
       { start: 9, end: 12 },
       { start: 14, end: 18 },
     ],
-    models: {
-      'deepseek-v4-flash': {
-        cny: { miss: 3, hit: 0.1, output: 9 },
-        usd: { miss: 0.44, hit: 0.014, output: 1.32 },
-      },
-      'deepseek-v4-flash-vision-exp': {
-        cny: { miss: 3, hit: 0.1, output: 9 },
-        usd: { miss: 0.44, hit: 0.014, output: 1.32 },
-      },
-      'deepseek-v4-pro': {
-        cny: { miss: 9, hit: 0.3, output: 27 },
-        usd: { miss: 1.32, hit: 0.044, output: 3.96 },
-      },
-      'deepseek-chat': {
-        cny: { miss: 2, hit: 0.5, output: 8 },
-        usd: { miss: 0.27, hit: 0.07, output: 1.1 },
-        flat: true,
-      },
-      'deepseek-reasoner': {
-        cny: { miss: 4, hit: 1, output: 16 },
-        usd: { miss: 0.55, hit: 0.14, output: 2.19 },
-        flat: true,
-      },
-    },
+    models: V4_PEAK_MODELS,
+  },
+  {
+    id: 'scheme-b-weekdays',
+    label: 'peak-offpeak-weekdays-2026-08-23',
+    effectiveFrom: SCHEME_B_WEEKDAYS_EFFECTIVE_FROM,
+    peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
+    peak: [
+      { start: 9, end: 12 },
+      { start: 14, end: 18 },
+    ],
+    peakDays: PEAK_WORKDAYS,
+    models: V4_PEAK_MODELS,
   },
   {
     id: 'scheme-c',

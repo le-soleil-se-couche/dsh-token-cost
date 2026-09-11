@@ -111,7 +111,7 @@ export interface PriceScheme {
   /**
    * Weekdays that bill at peak, 0 = Sunday .. 6 = Saturday, evaluated in the
    * `peakOffsetMinutes` clock. Absent or empty means every day. DeepSeek
-   * restricted peak billing to workdays on 2026-09-10.
+   * applies this restriction from the historical 2026-08-23 transition.
    */
   peakDays?: number[]
   /** Model id (normalized) -> prices. */
