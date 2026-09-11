@@ -14,7 +14,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 
 2026-09-05 update: this release uses the official npm `0.1.2-rc.1` SDK and its native settings and plugin-card types. It also reads session format v2, with ledger schema v4; fixes ledger-directory creation on Windows paths; preserves an explicit `flat: false` custom price through the settings form and local file; and refreshes an existing stats-line cost marker when new cost data arrives. Host SDK compatibility and log protocol support are verified separately: passing v2 synthetic fixtures does not establish runtime acceptance on a `0.1.3-alpha.1` host.
 
-2026-09-11 update: official price changes are in. Scheme C covers the V4.1 Flash cut effective 2026-09-10 12:00 Beijing (peak windows now workdays only), and scheme D bills `deepseek-v4-pro` at the Flash rate from 2026-09-14 12:00 Beijing. The retired `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` names bill at the Flash rate from scheme C, and vision-exp now has a rate in scheme B. History switches automatically by record time; no configuration change needed.
+2026-09-11 update: official price changes are in. Scheme C covers the V4.1 Flash cut effective 2026-09-10 12:00 Beijing, and scheme D bills `deepseek-v4-pro` at the Flash rate from 2026-09-14 12:00 Beijing. The retired `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` names bill at the Flash rate from scheme C, and vision-exp now has a rate in scheme B. A historical transition also applies weekend off-peak billing from 2026-08-23 while preserving each period's prices. Auto mode selects the scheme by record time.
 
 ## What it gives you
 
@@ -29,7 +29,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 </p>
 
 - **Overall summary** (Settings > Plugins > Plugin configuration > Token Cost): time-filtered totals with today / yesterday / last 7 days / last 30 days / this month / last month / custom (up to 30 days), grouped by model, session and day.
-- **Pricing status**: peak windows shown and billed in UTC+8 (09:00–12:00, 14:00–18:00). Since 2026-09-10 the official peak window is workdays only (weekends are fully off-peak), which the UI labels as "Workdays only".
+- **Pricing status**: peak windows shown and billed in UTC+8 (09:00–12:00, 14:00–18:00). From 2026-08-23, peak windows apply to workdays only (weekends are fully off-peak), which the UI labels as "Workdays only".
 - **Custom model prices**: Settings discovers unpriced models from the ledger, or you can add a model that has not been called yet. Enter per-1M cache-miss / cache-hit / output rates; **Add model** writes the local price file immediately (survives refresh) and history recalculates. Cache-hit may be left blank (billed as 0). Third-party models stay flat (DeepSeek peak/off-peak does not apply).
 
 ## Data source
@@ -58,16 +58,27 @@ dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 
 Use the official `@deepseek-ai/dsh@0.1.2-rc.1` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open Settings > Plugins > Plugin configuration > Token Cost. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
 
+### Plugin Hub reports an installation timeout
+
+`Request timed out: GitHub may be unreachable or the network is unstable` is a Plugin Hub request timeout. That message alone does not establish a plugin build failure. A GitHub installation also downloads build dependencies and runs `prepare`; inspect the complete terminal output.
+
+Record `dsh --version`, `node --version`, and `pnpm --version`, then run `git ls-remote https://github.com/le-soleil-se-couche/dsh-token-cost.git HEAD` to check GitHub connectivity. Run the installation command above in your own test profile and retain the complete output from the first error through process exit, including the exit code.
+
+If GitHub cannot be reached, resolve connectivity first. For `prepare`, TypeScript, or peer dependency errors, attach the relevant error and host version to the issue. Remove tokens, authentication URLs, proxy credentials, and personal paths before sharing logs. Keep the working profile when installation fails; verify the repair in a test profile before updating it.
+
 ## Built-in schemes
 
 | Scheme | Effective (Beijing time) | Notes |
 |---|---|---|
 | A `flat-2026-08` | before 2026-08-17 00:00 | Flat: V4 Flash miss/hit/output = 1 / 0.02 / 2 CNY; V4 Pro = 3 / 0.025 / 6 CNY |
 | B `peak-offpeak-2026-08-17` | from 2026-08-17 00:00 | Peak/off-peak every day: V4 Flash peak 3 / 0.1 / 9 CNY; V4 Pro peak 9 / 0.3 / 27 CNY |
+| B2 `peak-offpeak-weekdays-2026-08-23` | from 2026-08-23 00:00 | Same rates as B, with peak windows on workdays only and all weekend hours off-peak |
 | C `v4.1-flash-2026-09-10` | from 2026-09-10 12:00 | V4.1 Flash cut: peak 2 / 0.04 / 8 CNY; peak windows workdays only; retired `deepseek-v4-flash` names bill at the Flash rate |
 | D `v4-pro-to-flash-2026-09-14` | from 2026-09-14 12:00 | `deepseek-v4-pro` is routed to V4.1 Flash and billed at the Flash rate (until V4.1 Pro ships) |
 
-Rates are cache-miss / cache-hit / output CNY per 1M tokens at peak; off-peak bills half. From scheme C the peak window is Monday–Friday only (09:00–12:00, 14:00–18:00 UTC+8).
+Rates are cache-miss / cache-hit / output CNY per 1M tokens at peak; off-peak bills half. From scheme B2 the peak window is Monday–Friday only (09:00–12:00, 14:00–18:00 UTC+8). B2 is a historical transition used by auto mode; the existing manual A/B/C/D selections retain their meaning.
+
+The historical weekend-policy start date follows the contemporaneous [PR #2](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/2). The [current official pricing page](https://api-docs.deepseek.com/quick_start/pricing/) confirms Monday–Friday peak hours but does not retain that historical effective date.
 
 ## Configuration
 
