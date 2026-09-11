@@ -15,11 +15,11 @@ import type {
   StatusResponse,
   SummaryResponse,
 } from '../../protocol.ts'
-import { formatPeakWindows } from '../../pricing.ts'
+import { formatPeakWindows, peakLimitsWeekdays } from '../../pricing.ts'
 import { TokenCostApi } from '../api.ts'
 import { formatMoney, formatPercent, formatTokens } from '../format.ts'
 import type { TokenCostKey } from '../locales.ts'
-import { resolveSettings, useSettingsValue, type TokenCostSettingsScope } from '../settings-schema.ts'
+import { resolveSettings, useSettingsValue, type ResolvedSettings, type TokenCostSettingsScope } from '../settings-schema.ts'
 import { SessionDetailModal } from '../shared/SessionDetailModal.tsx'
 import { presetRange, validCustomRange, type TimePreset } from '../time-filters.ts'
 import css from './card.module.css'
@@ -172,7 +172,10 @@ function SummaryTab(props: TabProps) {
     <>
       {activeScheme?.peak !== undefined ? (
         <div className={css.schemeBanner}>
-          <span>{t('config.peakHours')}: <strong>{formatPeakWindows(activeScheme)}</strong></span>
+          <span>
+            {t('config.peakHours')}: <strong>{formatPeakWindows(activeScheme)}</strong>
+            {peakLimitsWeekdays(activeScheme) ? ` · ${t('config.peakWorkdays')}` : ''}
+          </span>
         </div>
       ) : null}
       <div className={css.filterRow}>
@@ -495,7 +498,10 @@ function ConfigTab(props: TabProps & { scope: TokenCostSettingsScope }) {
         {activeScheme?.peak !== undefined ? (
           <div className={css.statusItem}>
             <span className={css.statusLabel}>{t('config.peakHours')}</span>
-            <span className={css.statusValue}>{formatPeakWindows(activeScheme)}</span>
+            <span className={css.statusValue}>
+              {formatPeakWindows(activeScheme)}
+              {peakLimitsWeekdays(activeScheme) ? ` · ${t('config.peakWorkdays')}` : ''}
+            </span>
           </div>
         ) : null}
         <div className={css.statusItem}>
@@ -527,11 +533,13 @@ function ConfigTab(props: TabProps & { scope: TokenCostSettingsScope }) {
             id="token-cost-price-mode"
             className={css.select}
             value={priceMode}
-            onChange={(event) => { setPriceMode(event.target.value as 'auto' | 'scheme-a' | 'scheme-b'); setDirty(true) }}
+            onChange={(event) => { setPriceMode(event.target.value as ResolvedSettings['priceMode']); setDirty(true) }}
           >
             <option value="auto">{t('config.priceModeAuto')}</option>
             <option value="scheme-a">{t('config.priceModeA')}</option>
             <option value="scheme-b">{t('config.priceModeB')}</option>
+            <option value="scheme-c">{t('config.priceModeC')}</option>
+            <option value="scheme-d">{t('config.priceModeD')}</option>
           </select>
           <span className={css.fieldHint}>{t('config.priceModeHint')}</span>
         </div>

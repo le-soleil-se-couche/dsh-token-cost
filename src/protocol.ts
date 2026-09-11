@@ -108,6 +108,12 @@ export interface PriceScheme {
    * windows are present.
    */
   peakOffsetMinutes?: number
+  /**
+   * Weekdays that bill at peak, 0 = Sunday .. 6 = Saturday, evaluated in the
+   * `peakOffsetMinutes` clock. Absent or empty means every day. DeepSeek
+   * restricted peak billing to workdays on 2026-09-10.
+   */
+  peakDays?: number[]
   /** Model id (normalized) -> prices. */
   models: Record<string, ModelPrice>
 }

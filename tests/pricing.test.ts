@@ -6,18 +6,23 @@
 import { describe, expect, it } from 'vitest'
 import {
   FX_CNY_PER_USD,
+  PEAK_WORKDAYS,
   PRICE_SCHEMES,
   SCHEME_B_EFFECTIVE_FROM,
+  SCHEME_C_EFFECTIVE_FROM,
+  SCHEME_D_EFFECTIVE_FROM,
   convertPriceSet,
   formatPeakWindows,
   isPeakHour,
   modelPriceFromRates,
   normalizeModel,
   parseCustomPrices,
+  peakLimitsWeekdays,
   priceRecord,
   resolveScheme,
   serializeCustomPrices,
   totalsFor,
+  weekdayInOffset,
   withCustomPrices,
 } from '../src/pricing.ts'
 import type { UsageRecord } from '../src/protocol.ts'
@@ -51,6 +56,13 @@ describe('resolveScheme', () => {
     expect(resolveScheme(PRICE_SCHEMES, SCHEME_B_EFFECTIVE_FROM + 1, 'scheme-a').id).toBe('scheme-a')
     expect(resolveScheme(PRICE_SCHEMES, 0, 'scheme-b').id).toBe('scheme-b')
   })
+
+  it('switches to scheme-c at the 2026-09-10 12:00 Beijing price cut', () => {
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_C_EFFECTIVE_FROM - 1).id).toBe('scheme-b')
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_C_EFFECTIVE_FROM).id).toBe('scheme-c')
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_D_EFFECTIVE_FROM - 1).id).toBe('scheme-c')
+    expect(resolveScheme(PRICE_SCHEMES, SCHEME_D_EFFECTIVE_FROM).id).toBe('scheme-d')
+  })
 })
 
 describe('isPeakHour', () => {
@@ -70,6 +82,31 @@ describe('isPeakHour', () => {
   it('treats 08:59 Beijing as off-peak and 09:00 as peak', () => {
     expect(isPeakHour(schemeB, Date.UTC(2026, 7, 17, 0, 59, 0))).toBe(false)
     expect(isPeakHour(schemeB, Date.UTC(2026, 7, 17, 1, 0, 0))).toBe(true)
+  })
+
+  it('keeps scheme-b peak windows on weekends (every day)', () => {
+    // Saturday 2026-08-22 10:00 Beijing.
+    expect(isPeakHour(schemeB, Date.UTC(2026, 7, 22, 2, 0, 0))).toBe(true)
+    expect(peakLimitsWeekdays(schemeB)).toBe(false)
+  })
+
+  it('restricts scheme-c peak windows to workdays', () => {
+    const schemeC = PRICE_SCHEMES.find((scheme) => scheme.id === 'scheme-c')!
+    expect(schemeC.peakDays).toEqual(PEAK_WORKDAYS)
+    expect(peakLimitsWeekdays(schemeC)).toBe(true)
+    // Monday 2026-09-14 10:00 Beijing is peak.
+    expect(isPeakHour(schemeC, Date.UTC(2026, 8, 14, 2, 0, 0))).toBe(true)
+    // Saturday 2026-09-12 10:00 Beijing and Sunday 2026-09-13 10:00 Beijing are not.
+    expect(isPeakHour(schemeC, Date.UTC(2026, 8, 12, 2, 0, 0))).toBe(false)
+    expect(isPeakHour(schemeC, Date.UTC(2026, 8, 13, 2, 0, 0))).toBe(false)
+    // Off-peak hours stay off-peak on workdays (08:00 Beijing).
+    expect(isPeakHour(schemeC, Date.UTC(2026, 8, 14, 0, 0, 0))).toBe(false)
+  })
+
+  it('resolves the UTC+8 weekday across the UTC date boundary', () => {
+    // 2026-09-13 23:00Z is Monday 07:00 Beijing.
+    expect(weekdayInOffset(Date.UTC(2026, 8, 13, 23, 0, 0), 8 * 60)).toBe(1)
+    expect(weekdayInOffset(Date.UTC(2026, 8, 12, 16, 0, 0), 8 * 60)).toBe(0)
   })
 
   it('labels windows in the UTC+8 clock', () => {
@@ -105,6 +142,48 @@ describe('priceRecord', () => {
     const cost = priceRecord(chat, PRICE_SCHEMES)!
     expect(cost.costCny).toBeCloseTo(2, 6)
     expect(cost.peak).toBeNull()
+  })
+
+  it('bills deepseek-flash at the scheme-c cut rates, peak and off-peak', () => {
+    // Monday 2026-09-14: 10:00 Beijing peak, 08:00 Beijing off-peak.
+    const peak = record({ model: 'deepseek-flash', inputTokens: 1_000_000, time: Date.UTC(2026, 8, 14, 2, 0, 0) })
+    const offpeak = record({ model: 'deepseek-flash', inputTokens: 1_000_000, time: Date.UTC(2026, 8, 14, 0, 0, 0) })
+    expect(priceRecord(peak, PRICE_SCHEMES)!.costCny).toBeCloseTo(2, 6)
+    expect(priceRecord(peak, PRICE_SCHEMES)!.costUsd).toBeCloseTo(0.3, 6)
+    expect(priceRecord(peak, PRICE_SCHEMES)!.peak).toBe(true)
+    expect(priceRecord(offpeak, PRICE_SCHEMES)!.costCny).toBeCloseTo(1, 6)
+    expect(priceRecord(offpeak, PRICE_SCHEMES)!.peak).toBe(false)
+  })
+
+  it('bills scheme-c weekend daytime at off-peak (workdays only)', () => {
+    // Saturday 2026-09-12 10:00 Beijing.
+    const cost = priceRecord(
+      record({ model: 'deepseek-flash', inputTokens: 0, outputTokens: 1_000_000, time: Date.UTC(2026, 8, 12, 2, 0, 0) }),
+      PRICE_SCHEMES,
+    )!
+    expect(cost.costCny).toBeCloseTo(4, 6)
+    expect(cost.peak).toBe(false)
+  })
+
+  it('routes the retired V4 Flash names to the Flash rate from scheme-c', () => {
+    const cut = Date.UTC(2026, 8, 10, 6, 0, 0) // Thursday 14:00 Beijing, scheme-c peak
+    const rerouted = Date.UTC(2026, 8, 14, 6, 0, 0) // Monday 14:00 Beijing, scheme-d peak
+    for (const model of ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
+      const c = priceRecord(record({ model, inputTokens: 1_000_000, time: cut }), PRICE_SCHEMES)!
+      expect(c.costCny).toBeCloseTo(2, 6)
+      expect(c.schemeId).toBe('scheme-c')
+      const d = priceRecord(record({ model, inputTokens: 1_000_000, time: rerouted }), PRICE_SCHEMES)!
+      expect(d.costCny).toBeCloseTo(2, 6)
+      expect(d.schemeId).toBe('scheme-d')
+    }
+  })
+
+  it('keeps V4 Pro pricing until scheme-d, then bills it at the Flash rate', () => {
+    const before = record({ model: 'deepseek-v4-pro', inputTokens: 1_000_000, time: Date.UTC(2026, 8, 14, 2, 0, 0) })
+    const after = record({ model: 'deepseek-v4-pro', inputTokens: 1_000_000, time: Date.UTC(2026, 8, 14, 6, 0, 0) })
+    expect(priceRecord(before, PRICE_SCHEMES)!.costCny).toBeCloseTo(9, 6)
+    expect(priceRecord(after, PRICE_SCHEMES)!.costCny).toBeCloseTo(2, 6)
+    expect(priceRecord(after, PRICE_SCHEMES)!.schemeId).toBe('scheme-d')
   })
 
   it('returns null for unknown models', () => {

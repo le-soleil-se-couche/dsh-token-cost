@@ -39,7 +39,7 @@ export interface Config {
   /** Display currency for every cost figure. */
   currency?: 'cny' | 'usd'
   /** Pricing scheme selection: auto (by record time) or a forced scheme. */
-  priceMode?: 'auto' | 'scheme-a' | 'scheme-b'
+  priceMode?: 'auto' | 'scheme-a' | 'scheme-b' | 'scheme-c' | 'scheme-d'
   /** Custom model prices as JSON text; empty string = none. */
   customPrices?: string
 }
@@ -47,7 +47,13 @@ export interface Config {
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   currency: z.union([z.const('cny'), z.const('usd')]).default('cny'),
-  priceMode: z.union([z.const('auto'), z.const('scheme-a'), z.const('scheme-b')]).default('auto'),
+  priceMode: z.union([
+    z.const('auto'),
+    z.const('scheme-a'),
+    z.const('scheme-b'),
+    z.const('scheme-c'),
+    z.const('scheme-d'),
+  ]).default('auto'),
   customPrices: z.string().default(''),
 })
 

@@ -6,7 +6,7 @@
  * shipping one more scheme entry is the whole adaptation, no code changes.
  *
  * Catalog source: https://api-docs.deepseek.com/quick_start/pricing
- * (fetched 2026-08-14; the CNY table and the USD table agree).
+ * (fetched 2026-09-11; the CNY table and the USD table agree).
  *
  * Scheme A (flat, until 2026-08-16T16:00Z):
  *   deepseek-v4-flash  cny miss 1 / hit 0.02 / out 2     usd 0.14 / 0.0028 / 0.28
@@ -15,10 +15,25 @@
  *   deepseek-reasoner  cny miss 4 / hit 1 / out 16        usd 0.55 / 0.14 / 2.19   (legacy flat)
  *
  * Scheme B (peak/off-peak, from 2026-08-16T16:00Z = 2026-08-17 00:00 Beijing):
- *   peak hours Beijing 09:00-12:00 and 14:00-18:00 (UTC+8); off-peak bills half.
+ *   peak hours Beijing 09:00-12:00 and 14:00-18:00 every day (UTC+8); off-peak
+ *   bills half.
  *   deepseek-v4-flash  peak cny miss 3 / hit 0.10 / out 9     usd 0.44 / 0.014 / 1.32
+ *   deepseek-v4-flash-vision-exp  same as deepseek-v4-flash (released 2026-08-21)
  *   deepseek-v4-pro    peak cny miss 9 / hit 0.30 / out 27    usd 1.32 / 0.044 / 3.96
  *   legacy models keep their flat prices (not covered by the announcement).
+ *
+ * Scheme C (V4.1 Flash price cut, from 2026-09-10T04:00Z = 12:00 Beijing):
+ *   peak windows unchanged but restricted to workdays, Monday-Friday
+ *   (announced 2026-09-09; previously every day).
+ *   deepseek-flash     peak cny miss 2 / hit 0.04 / out 8     usd 0.30 / 0.006 / 1.20
+ *   deepseek-v4-flash, deepseek-v4-flash-vision-exp
+ *                      same Flash price: the retired models are routed to
+ *                      DeepSeek-V4.1-Flash and billed at the Flash rate.
+ *   deepseek-v4-pro    unchanged peak cny miss 9 / hit 0.30 / out 27
+ *                                  usd 1.32 / 0.044 / 3.96
+ *
+ * Scheme D (V4 Pro routed to V4.1 Flash, from 2026-09-14T04:00Z = 12:00 Beijing):
+ *   deepseek-v4-pro    billed at the Flash rate until V4.1 Pro ships.
  *
  * Prices are per 1M tokens; cost = tokens / 1e6 * price.
  */
@@ -28,8 +43,17 @@ import type { ModelPrice, PriceScheme, PriceSet, UsageRecord } from './protocol.
 /** UTC instant the peak/off-peak scheme starts billing. */
 export const SCHEME_B_EFFECTIVE_FROM = Date.UTC(2026, 7, 16, 16, 0, 0)
 
+/** UTC instant the V4.1 Flash price cut starts billing (12:00 Beijing). */
+export const SCHEME_C_EFFECTIVE_FROM = Date.UTC(2026, 8, 10, 4, 0, 0)
+
+/** UTC instant V4 Pro is routed to V4.1 Flash billing (12:00 Beijing). */
+export const SCHEME_D_EFFECTIVE_FROM = Date.UTC(2026, 8, 14, 4, 0, 0)
+
 /** Official DeepSeek peak clock: Beijing / UTC+8. */
 export const PEAK_TZ_OFFSET_MINUTES = 8 * 60
+
+/** Workdays (Mon-Fri) as `Date.getDay()` numbers, peak billing only. */
+export const PEAK_WORKDAYS = [1, 2, 3, 4, 5]
 
 /**
  * Reference FX used only to fill the other display currency when the user
@@ -42,7 +66,7 @@ export function normalizeModel(model: string): string {
   return model.trim().toLowerCase()
 }
 
-/** Built-in catalog keys (scheme-a and scheme-b share the same model set). */
+/** Built-in catalog keys (every scheme carries the same DeepSeek model set). */
 export function builtinModelIds(schemes: PriceScheme[] = PRICE_SCHEMES): Set<string> {
   const ids = new Set<string>()
   for (const scheme of schemes) {
@@ -59,6 +83,31 @@ export function convertPriceSet(set: PriceSet, from: 'cny' | 'usd'): PriceSet {
     hit: set.hit * factor,
     output: set.output * factor,
   }
+}
+
+/** Peak rates of V4.1 Flash (2026-09-10); off-peak bills half. */
+const V41_FLASH_PEAK: ModelPrice = {
+  cny: { miss: 2, hit: 0.04, output: 8 },
+  usd: { miss: 0.3, hit: 0.006, output: 1.2 },
+}
+
+/** Peak rates of V4 Pro, unchanged by the V4.1 Flash release. */
+const V4_PRO_PEAK: ModelPrice = {
+  cny: { miss: 9, hit: 0.3, output: 27 },
+  usd: { miss: 1.32, hit: 0.044, output: 3.96 },
+}
+
+/** Retired chat / reasoner names keep their flat rates. */
+const LEGACY_CHAT_FLAT: ModelPrice = {
+  cny: { miss: 2, hit: 0.5, output: 8 },
+  usd: { miss: 0.27, hit: 0.07, output: 1.1 },
+  flat: true,
+}
+
+const LEGACY_REASONER_FLAT: ModelPrice = {
+  cny: { miss: 4, hit: 1, output: 16 },
+  usd: { miss: 0.55, hit: 0.14, output: 2.19 },
+  flat: true,
 }
 
 /** The built-in catalog: newest last. */
@@ -102,6 +151,10 @@ export const PRICE_SCHEMES: PriceScheme[] = [
         cny: { miss: 3, hit: 0.1, output: 9 },
         usd: { miss: 0.44, hit: 0.014, output: 1.32 },
       },
+      'deepseek-v4-flash-vision-exp': {
+        cny: { miss: 3, hit: 0.1, output: 9 },
+        usd: { miss: 0.44, hit: 0.014, output: 1.32 },
+      },
       'deepseek-v4-pro': {
         cny: { miss: 9, hit: 0.3, output: 27 },
         usd: { miss: 1.32, hit: 0.044, output: 3.96 },
@@ -116,6 +169,44 @@ export const PRICE_SCHEMES: PriceScheme[] = [
         usd: { miss: 0.55, hit: 0.14, output: 2.19 },
         flat: true,
       },
+    },
+  },
+  {
+    id: 'scheme-c',
+    label: 'v4.1-flash-2026-09-10',
+    effectiveFrom: SCHEME_C_EFFECTIVE_FROM,
+    peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
+    peak: [
+      { start: 9, end: 12 },
+      { start: 14, end: 18 },
+    ],
+    peakDays: PEAK_WORKDAYS,
+    models: {
+      'deepseek-flash': V41_FLASH_PEAK,
+      'deepseek-v4-flash': V41_FLASH_PEAK,
+      'deepseek-v4-flash-vision-exp': V41_FLASH_PEAK,
+      'deepseek-v4-pro': V4_PRO_PEAK,
+      'deepseek-chat': LEGACY_CHAT_FLAT,
+      'deepseek-reasoner': LEGACY_REASONER_FLAT,
+    },
+  },
+  {
+    id: 'scheme-d',
+    label: 'v4-pro-to-flash-2026-09-14',
+    effectiveFrom: SCHEME_D_EFFECTIVE_FROM,
+    peakOffsetMinutes: PEAK_TZ_OFFSET_MINUTES,
+    peak: [
+      { start: 9, end: 12 },
+      { start: 14, end: 18 },
+    ],
+    peakDays: PEAK_WORKDAYS,
+    models: {
+      'deepseek-flash': V41_FLASH_PEAK,
+      'deepseek-v4-flash': V41_FLASH_PEAK,
+      'deepseek-v4-flash-vision-exp': V41_FLASH_PEAK,
+      'deepseek-v4-pro': V41_FLASH_PEAK,
+      'deepseek-chat': LEGACY_CHAT_FLAT,
+      'deepseek-reasoner': LEGACY_REASONER_FLAT,
     },
   },
 ]
@@ -252,17 +343,36 @@ export function hourInOffset(time: number, offsetMinutes: number): number {
 }
 
 /**
+ * Weekday 0-6 (0 = Sunday) of an instant in a fixed UTC offset.
+ * Epoch day 0 (1970-01-01) was a Thursday, hence the +4.
+ */
+export function weekdayInOffset(time: number, offsetMinutes: number): number {
+  const day = Math.floor((time + offsetMinutes * 60_000) / 86_400_000)
+  return (((day + 4) % 7) + 7) % 7
+}
+
+/**
  * Whether an instant falls inside a scheme's peak window.
- * Hours are evaluated in the scheme's official clock (DeepSeek: UTC+8).
+ * Hours and weekdays are evaluated in the scheme's official clock
+ * (DeepSeek: UTC+8, workdays only since 2026-09-10).
  */
 export function isPeakHour(scheme: PriceScheme, time: number): boolean {
   if (scheme.peak === undefined || scheme.peak.length === 0) return false
   const offset = scheme.peakOffsetMinutes ?? PEAK_TZ_OFFSET_MINUTES
+  if (scheme.peakDays !== undefined && scheme.peakDays.length > 0
+    && !scheme.peakDays.includes(weekdayInOffset(time, offset))) {
+    return false
+  }
   const hour = hourInOffset(time, offset)
   for (const window of scheme.peak) {
     if (window.start <= hour && hour < window.end) return true
   }
   return false
+}
+
+/** True when peak windows apply to a subset of weekdays (e.g. Mon-Fri). */
+export function peakLimitsWeekdays(scheme: PriceScheme): boolean {
+  return scheme.peakDays !== undefined && scheme.peakDays.length > 0 && scheme.peakDays.length < 7
 }
 
 /** Human label for peak windows, e.g. `09:00-12:00、14:00-18:00`. */

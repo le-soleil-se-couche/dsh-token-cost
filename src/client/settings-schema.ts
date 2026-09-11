@@ -16,7 +16,7 @@ export interface TokenCostSettings {
   /** Display currency for every cost figure. */
   currency?: 'cny' | 'usd'
   /** Pricing scheme selection: auto (by record time) or a forced scheme. */
-  priceMode?: 'auto' | 'scheme-a' | 'scheme-b'
+  priceMode?: 'auto' | 'scheme-a' | 'scheme-b' | 'scheme-c' | 'scheme-d'
   /** Custom model prices as JSON text; empty string = none. */
   customPrices?: string
 }
@@ -28,7 +28,7 @@ export type TokenCostSettingsScope = SettingsScope<TokenCostSettings>
 export interface ResolvedSettings {
   enabled: boolean
   currency: 'cny' | 'usd'
-  priceMode: 'auto' | 'scheme-a' | 'scheme-b'
+  priceMode: 'auto' | 'scheme-a' | 'scheme-b' | 'scheme-c' | 'scheme-d'
 }
 
 /** Apply defaults to a raw section value. */
