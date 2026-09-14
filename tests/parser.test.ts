@@ -4,6 +4,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { parseSessionLog } from '../src/parser.ts'
 
 const LOG = [
@@ -18,6 +20,17 @@ const LOG = [
 ].join('\n')
 
 describe('parseSessionLog', () => {
+  it('preserves v3 billing across system replacements, repeated seed cuts, retry and compaction', () => {
+    // Accounting projection fixture, not an end-to-end host/session validator.
+    // V3's system heads and startSeq/endSeq replacements do not add billable calls.
+    const text = readFileSync(join(__dirname, 'fixtures/session-v3-accounting.jsonl'), 'utf8')
+    const records = parseSessionLog(text, 'session-v3-accounting', '', 3).records
+    expect(records.map(({ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens }) =>
+      [inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens],
+    )).toEqual([[4, 2, 6, 1, 3], [8, 5, 13, 2, 4], [31, 9, 37, 6, 5]])
+    expect(records.map(({ model }) => model)).toEqual(['child', 'child', 'summary'])
+  })
+
   it('extracts meta and folds per-step usage with last-wins', () => {
     const parsed = parseSessionLog(LOG, 'session-abc', '')
     expect(parsed.meta.sessionId).toBe('session-abc')
@@ -171,10 +184,10 @@ describe('parseSessionLog', () => {
     ])
   })
 
-  it('folds released-v2 embedded streams, packed runs, and retry boundaries', () => {
+  it.each([2, 3])('folds released-v%s embedded streams, packed runs, and retry boundaries', (version) => {
     const log = [
       {
-        type: 'session', version: 2, id: 'session-v2-retry', createdAt: 1,
+        type: 'session', version, id: 'session-v2-retry', createdAt: 1,
         cwd: '/fixture', isSeeded: false, delegationDepth: 0,
       },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider-a', model: 'model-a' } },
@@ -210,7 +223,7 @@ describe('parseSessionLog', () => {
       },
     ].map((event) => JSON.stringify(event)).join('\n')
 
-    const records = parseSessionLog(log, 'session-v2-retry', '', 2).records
+    const records = parseSessionLog(log, 'session-v2-retry', '', version).records
     expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject({
       provider: 'provider-a',
@@ -227,9 +240,9 @@ describe('parseSessionLog', () => {
     })
   })
 
-  it('uses the last embedded v2 usage when assistant/message has no direct usage', () => {
+  it.each([2, 3])('uses the last embedded v%s usage when assistant/message has no direct usage', (version) => {
     const log = [
-      { type: 'session', version: 2, id: 'session-v2-stream', createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      { type: 'session', version, id: 'session-v2-stream', createdAt: 1, isSeeded: false, delegationDepth: 0 },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider', model: 'model' } },
       {
         type: 'assistant/message', seq: 1, time: 4, surfaceOp: 'append', data: {
@@ -244,15 +257,15 @@ describe('parseSessionLog', () => {
       },
     ].map((event) => JSON.stringify(event)).join('\n')
 
-    expect(parseSessionLog(log, 'session-v2-stream', '', 2).records).toEqual([
+    expect(parseSessionLog(log, 'session-v2-stream', '', version).records).toEqual([
       expect.objectContaining({ inputTokens: 7, outputTokens: 4 }),
     ])
   })
 
-  it('excludes a v2 fork prefix using the last inherited end-seed marker', () => {
+  it.each([2, 3])('excludes a v%s fork prefix using the last inherited end-seed marker', (version) => {
     const log = [
       {
-        type: 'session', version: 2, id: 'session-v2-child', createdAt: 1,
+        type: 'session', version, id: 'session-v2-child', createdAt: 1,
         parentSession: 'parent', isSeeded: true, delegationDepth: 1,
       },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'parent-provider', model: 'parent-model' } },
@@ -272,23 +285,23 @@ describe('parseSessionLog', () => {
       },
     ].map((event) => JSON.stringify(event)).join('\n')
 
-    const records = parseSessionLog(log, 'session-v2-child', '', 2).records
+    const records = parseSessionLog(log, 'session-v2-child', '', version).records
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ model: 'child-model', inputTokens: 20, outputTokens: 5 })
   })
 
-  it('refuses unknown generations, filename/header mismatches, and malformed v2 seed metadata', () => {
+  it.each([2, 3])('refuses unknown generations, filename/header mismatches, and malformed v%s seed metadata', (version) => {
     expect(() => parseSessionLog(JSON.stringify({
-      type: 'session', version: 3, id: 'future', createdAt: 1,
-    }), 'future', '', 3)).toThrow('unsupported session format version v3')
+      type: 'session', version: 4, id: 'future', createdAt: 1,
+    }), 'future', '', 4)).toThrow('unsupported session format version v4')
 
     expect(() => parseSessionLog(JSON.stringify({
       type: 'session', version: 1, id: 'mismatch', createdAt: 1,
-    }), 'mismatch', '', 2)).toThrow('filename identifies format v2')
+    }), 'mismatch', '', version)).toThrow(`filename identifies format v${version}`)
 
     expect(() => parseSessionLog(JSON.stringify({
-      type: 'session', version: 2, id: 'seeded', createdAt: 1,
+      type: 'session', version, id: 'seeded', createdAt: 1,
       isSeeded: true, delegationDepth: 1,
-    }), 'seeded', '', 2)).toThrow('lacks an inherited end-seed marker')
+    }), 'seeded', '', version)).toThrow('lacks an inherited end-seed marker')
   })
 })

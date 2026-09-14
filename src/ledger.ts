@@ -16,7 +16,7 @@ import type { SessionMeta, UsageRecord } from './protocol.ts'
 import { parseSessionLog } from './parser.ts'
 
 /** Parser semantics version; a bump forces authoritative session-log refolding. */
-const LEDGER_VERSION = 4
+const LEDGER_VERSION = 5
 
 const SESSION_LOG_NAME = /^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/u
 
