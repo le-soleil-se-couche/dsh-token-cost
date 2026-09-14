@@ -2,7 +2,7 @@
  * Pure parser for DSH session logs.
  *
  * Released v0/v1 logs keep provider chunks as top-level `assistant/chunk`
- * events. Released v2 stores one settled attempt per `assistant/message` or
+ * events. Released v2/v3 store one settled attempt per `assistant/message` or
  * `assistant/attempt`, with its exact provider stream embedded in `data.stream`.
  * In every format the last usage sample inside one provider attempt wins, and
  * `llm/retry-started` opens the next billable attempt for the same turn/step.
@@ -16,7 +16,7 @@ export interface ParsedSession {
 }
 
 /** Session generations whose released accounting grammar this parser knows. */
-export const SUPPORTED_SESSION_FORMAT_VERSIONS = [0, 1, 2] as const
+export const SUPPORTED_SESSION_FORMAT_VERSIONS = [0, 1, 2, 3] as const
 type SupportedSessionFormatVersion = (typeof SUPPORTED_SESSION_FORMAT_VERSIONS)[number]
 
 /** Stable base key shared by every provider attempt of one loop step. */
@@ -31,7 +31,7 @@ function objectRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function supportedVersion(value: unknown): SupportedSessionFormatVersion {
-  if (value === 0 || value === 1 || value === 2) return value
+  if (value === 0 || value === 1 || value === 2 || value === 3) return value
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
     throw new Error(`unsupported session format version v${value}`)
   }
@@ -39,7 +39,9 @@ function supportedVersion(value: unknown): SupportedSessionFormatVersion {
 }
 
 /**
- * Return the last usage chunk in a released-v2 embedded Assistant stream.
+ * Return the last usage chunk in a released-v2/v3 embedded Assistant stream.
+ * V3 retains this grammar, usage payloads and the inherited end-seed cut:
+ * https://github.com/deepseek-ai/deepseek-harness/blob/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/session/session-format-v2-to-v3/src/codec.ts
  * Packed text/reasoning/tool-call runs cannot carry usage; the official
  * grammar keeps usage as `{type:'chunk', time, chunk:{type:'usage', usage}}`.
  */
@@ -92,7 +94,7 @@ export function parseSessionLog(
   let headerSeen = false
   let formatVersion: SupportedSessionFormatVersion | undefined
   let seedLength = 0
-  let v2IsSeeded = false
+  let isSeeded = false
   const events: Record<string, unknown>[] = []
 
   for (const raw of text.split('\n')) {
@@ -132,9 +134,9 @@ export function parseSessionLog(
         }
       } else {
         if (typeof event.isSeeded !== 'boolean') {
-          throw new Error('session format v2 header is missing boolean isSeeded')
+          throw new Error(`session format v${formatVersion} header is missing boolean isSeeded`)
         }
-        v2IsSeeded = event.isSeeded
+        isSeeded = event.isSeeded
       }
       continue
     }
@@ -150,7 +152,7 @@ export function parseSessionLog(
     throw new Error('session log is missing its session header')
   }
 
-  if (formatVersion === 2) {
+  if (formatVersion >= 2) {
     let inheritedCut: number | undefined
     for (const event of events) {
       if (event.type !== 'session/end-seed') continue
@@ -159,14 +161,14 @@ export function parseSessionLog(
       const seq = typeof event.seq === 'number' && Number.isSafeInteger(event.seq) && event.seq >= 0
         ? event.seq
         : undefined
-      if (seq === undefined) throw new Error('session format v2 inherited end-seed marker needs a valid seq')
+      if (seq === undefined) throw new Error(`session format v${formatVersion} inherited end-seed marker needs a valid seq`)
       inheritedCut = seq
     }
-    if (v2IsSeeded && inheritedCut === undefined) {
-      throw new Error('session format v2 seeded header lacks an inherited end-seed marker')
+    if (isSeeded && inheritedCut === undefined) {
+      throw new Error(`session format v${formatVersion} seeded header lacks an inherited end-seed marker`)
     }
-    if (!v2IsSeeded && inheritedCut !== undefined) {
-      throw new Error('session format v2 unseeded header contains an inherited end-seed marker')
+    if (!isSeeded && inheritedCut !== undefined) {
+      throw new Error(`session format v${formatVersion} unseeded header contains an inherited end-seed marker`)
     }
     seedLength = inheritedCut ?? 0
   }
@@ -239,7 +241,7 @@ export function parseSessionLog(
         break
       }
       case 'assistant/chunk': {
-        if (formatVersion === 2 || !owned) break
+        if (formatVersion >= 2 || !owned) break
         const data = objectRecord(event.data)
         const chunk = objectRecord(data?.chunk)
         if (chunk?.type === 'usage') recordAttempt(data, objectRecord(chunk.usage), time)
@@ -248,7 +250,7 @@ export function parseSessionLog(
       case 'assistant/message': {
         if (!owned) break
         const data = objectRecord(event.data)
-        if (formatVersion === 2) {
+        if (formatVersion >= 2) {
           recordAttempt(
             data,
             objectRecord(data?.usage) ?? lastEmbeddedUsage(data?.stream),
@@ -261,7 +263,7 @@ export function parseSessionLog(
         break
       }
       case 'assistant/attempt': {
-        if (formatVersion !== 2 || !owned) break
+        if (formatVersion < 2 || !owned) break
         const data = objectRecord(event.data)
         recordAttempt(data, lastEmbeddedUsage(data?.stream), time)
         break
