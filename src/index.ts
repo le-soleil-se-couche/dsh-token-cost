@@ -125,21 +125,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
 
-  // Use the released SDK owner handle so registration and observation stay
-  // checked against the host's schema and lifecycle contract.
-  ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(TOKEN_COST_SETTINGS_NAMESPACE, Config, { base: config ?? {} })
-    current = () => scope.get()
-    rebuild()
-    settingsCtx.effect(
-      () => scope.watch(() => { rebuild() }),
-      'dsh-token-cost: settings changes',
-    )
-    settingsCtx.effect(() => () => {
-      current = () => config ?? {}
-      rebuild()
-    }, 'dsh-token-cost: settings fallback')
-  })
+  // DSH 0.2 owns Config forms and reloads the plugin when its entry changes.
   rebuild()
   void priceStore.whenReady().then(() => { rebuild() })
 }

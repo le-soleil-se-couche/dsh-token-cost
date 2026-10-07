@@ -4,7 +4,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 /** The namespace string both halves spell. */
 export const TOKEN_COST_NS = 'token-cost'
@@ -22,7 +22,7 @@ export interface TokenCostSettings {
 }
 
 /** Bound settings namespace from the official browser SDK. */
-export type TokenCostSettingsScope = SettingsScope<TokenCostSettings>
+export type TokenCostSettingsScope = ConfigForm<TokenCostSettings>
 
 /** Resolved display facts with defaults applied. */
 export interface ResolvedSettings {

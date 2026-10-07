@@ -184,7 +184,7 @@ describe('parseSessionLog', () => {
     ])
   })
 
-  it.each([2, 3])('folds released-v%s embedded streams, packed runs, and retry boundaries', (version) => {
+  it.each([2, 3, 4])('folds released-v%s embedded streams, packed runs, and retry boundaries', (version) => {
     const log = [
       {
         type: 'session', version, id: 'session-v2-retry', createdAt: 1,
@@ -240,7 +240,7 @@ describe('parseSessionLog', () => {
     })
   })
 
-  it.each([2, 3])('uses the last embedded v%s usage when assistant/message has no direct usage', (version) => {
+  it.each([2, 3, 4])('uses the last embedded v%s usage when assistant/message has no direct usage', (version) => {
     const log = [
       { type: 'session', version, id: 'session-v2-stream', createdAt: 1, isSeeded: false, delegationDepth: 0 },
       { type: 'request/context', seq: 0, time: 1, data: { provider: 'provider', model: 'model' } },
@@ -262,7 +262,7 @@ describe('parseSessionLog', () => {
     ])
   })
 
-  it.each([2, 3])('excludes a v%s fork prefix using the last inherited end-seed marker', (version) => {
+  it.each([2, 3, 4])('excludes a v%s fork prefix using the last inherited end-seed marker', (version) => {
     const log = [
       {
         type: 'session', version, id: 'session-v2-child', createdAt: 1,
@@ -290,10 +290,10 @@ describe('parseSessionLog', () => {
     expect(records[0]).toMatchObject({ model: 'child-model', inputTokens: 20, outputTokens: 5 })
   })
 
-  it.each([2, 3])('refuses unknown generations, filename/header mismatches, and malformed v%s seed metadata', (version) => {
+  it.each([2, 3, 4])('refuses unknown generations, filename/header mismatches, and malformed v%s seed metadata', (version) => {
     expect(() => parseSessionLog(JSON.stringify({
-      type: 'session', version: 4, id: 'future', createdAt: 1,
-    }), 'future', '', 4)).toThrow('unsupported session format version v4')
+      type: 'session', version: 5, id: 'future', createdAt: 1,
+    }), 'future', '', 5)).toThrow('unsupported session format version v5')
 
     expect(() => parseSessionLog(JSON.stringify({
       type: 'session', version: 1, id: 'mismatch', createdAt: 1,

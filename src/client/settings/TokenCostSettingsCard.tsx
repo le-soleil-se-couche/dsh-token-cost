@@ -32,7 +32,7 @@ export interface TokenCostSettingsCardFace {
 
 /** Full props the renderer binds for the official configurable-plugin card. */
 export type TokenCostSettingsCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'settings.plugins.tab'>
   & PropsLocale<'token-cost'>
   & InjectFace<TokenCostSettingsCardFace>
 
