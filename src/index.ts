@@ -7,7 +7,7 @@
  * NPM SDK packages — no dsh source changes.
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { homedir } from 'node:os'
@@ -35,26 +35,26 @@ export const TOKEN_COST_SETTINGS_NAMESPACE = 'token-cost'
 /** Plugin config, validated by the same-named schemastery schema. */
 export interface Config {
   /** Master switch for the plugin (routes + surfaces). */
-  enabled?: boolean
+  enabled: Volatile<boolean>
   /** Display currency for every cost figure. */
-  currency?: 'cny' | 'usd'
+  currency: Volatile<'cny' | 'usd'>
   /** Pricing scheme selection: auto (by record time) or a forced scheme. */
-  priceMode?: 'auto' | 'scheme-a' | 'scheme-b' | 'scheme-c' | 'scheme-d'
+  priceMode: Volatile<'auto' | 'scheme-a' | 'scheme-b' | 'scheme-c' | 'scheme-d'>
   /** Custom model prices as JSON text; empty string = none. */
-  customPrices?: string
+  customPrices: Volatile<string>
 }
 
-export const Config: z<Config> = z.object({
-  enabled: z.boolean().default(true),
-  currency: z.union([z.const('cny'), z.const('usd')]).default('cny'),
+export const Config = z.object({
+  enabled: z.boolean().default(true).volatile(),
+  currency: z.union([z.const('cny'), z.const('usd')]).default('cny').volatile(),
   priceMode: z.union([
     z.const('auto'),
     z.const('scheme-a'),
     z.const('scheme-b'),
     z.const('scheme-c'),
     z.const('scheme-d'),
-  ]).default('auto'),
-  customPrices: z.string().default(''),
+  ]).default('auto').volatile(),
+  customPrices: z.string().default('').volatile(),
 })
 
 /** Resolve the harness home: $DSH_HOME, else ~/.dsh. */
@@ -68,21 +68,7 @@ function resolveDshHome(): string {
  * @param ctx - host plugin context carrying webServer.
  * @param config - resolved plugin config (schema defaults applied by the loader).
  */
-export function apply(ctx: Context, config: Config = {}): void {
-  // The live source the surfaces read: the settings section once the web
-  // settings surface is served, the composition entry otherwise.
-  let current: () => Config = () => config ?? {}
-  /** Fully-resolved config: every field concrete (schema defaults applied). */
-  const resolve = (): Required<Config> => {
-    const value = current()
-    return {
-      enabled: value.enabled ?? true,
-      currency: value.currency ?? 'cny',
-      priceMode: value.priceMode ?? 'auto',
-      customPrices: value.customPrices ?? '',
-    }
-  }
-
+export function apply(ctx: Context, config: Config = Config({})): void {
   const home = resolveDshHome()
   const storageDir = join(home, 'storages', 'dsh-token-cost')
   const ledger = new SessionLedger(
@@ -98,18 +84,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       disposeRoutes()
       disposeRoutes = undefined
     }
-    const value = resolve()
-    if (!value.enabled) return
+    if (!config.enabled.get()) return
     /** Resolve the pricing facts per request (settings edits land live). */
     const pricing = (): { priceMode: string; currency: string } => ({
-      priceMode: value.priceMode,
-      currency: value.currency,
+      priceMode: config.priceMode.get(),
+      currency: config.currency.get(),
     })
     const customPrices = (): Record<string, ModelPrice> => {
       const stored = priceStore.get()
       if (Object.keys(stored).length > 0) return stored
       try {
-        return parseCustomPrices(value.customPrices)
+        return parseCustomPrices(config.customPrices.get())
       } catch {
         return {}
       }
@@ -125,7 +110,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
 
-  // DSH 0.2 owns Config forms and reloads the plugin when its entry changes.
+  // DSH 0.2 commits volatile edits into stable references without remounting.
+  // Only the switch changes route registration; pricing is read per request.
+  ctx.events.on('loader/volatile-update', (paths: readonly (readonly string[])[]) => {
+    if (paths.some((path) => path[0] === 'enabled')) rebuild()
+  })
   rebuild()
   void priceStore.whenReady().then(() => { rebuild() })
 }

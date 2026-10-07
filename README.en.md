@@ -6,7 +6,7 @@
 
 Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI — per conversation and in aggregate. Built-in DeepSeek official schemes (including the V4.1 Flash price cut and the V4 Pro rerouting, UTC+8 peak/off-peak), plus a form to price any other model you call.
 
-2026-10-08 update: v0.3.0 adapts to DeepSeek Harness `0.2.0-rc.2`. Session cost now renders through the official composer dock instead of locating the old editor/stats DOM. Its font family, size and color match the adjacent metrics; a dotted underline indicates the detail action. The update also adopts the current settings API, reads session format v4, and rebuilds stale caches with ledger v6. Cost display, detail opening and session switching were verified in the macOS desktop app.
+2026-10-08 update: v0.3.0 adapts to DeepSeek Harness `0.2.0-rc.2`. Session cost now renders through the official composer dock instead of locating the old editor/stats DOM. Its font family, size and color match the adjacent metrics; a dotted underline indicates the detail action. The update also adopts the current settings API with live configuration edits, reads session format v4, and rebuilds stale caches with ledger v6. Cost display, detail opening and session switching were verified in the macOS desktop app.
 
 2026-08-17 update: you can enter unit prices for other models you call. **Add model** writes a local price file immediately (survives refresh) and history recalculates.
 
