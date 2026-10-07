@@ -6,6 +6,8 @@
 
 Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI — per conversation and in aggregate. Built-in DeepSeek official schemes (including the V4.1 Flash price cut and the V4 Pro rerouting, UTC+8 peak/off-peak), plus a form to price any other model you call.
 
+2026-10-08 update: v0.3.0 adapts to DeepSeek Harness `0.2.0-rc.2`. Session cost now renders through the official composer dock instead of locating the old editor/stats DOM. Its font family, size and color match the adjacent metrics; a dotted underline indicates the detail action. The update also adopts the current settings API with live configuration edits, reads session format v4, and rebuilds stale caches with ledger v6. Cost display, detail opening and session switching were verified in the macOS desktop app.
+
 2026-08-17 update: you can enter unit prices for other models you call. **Add model** writes a local price file immediately (survives refresh) and history recalculates.
 
 2026-08-25 update: the accounting core now uses an attempt-aware fold covering retries after failed calls, `compaction/summary.usage`, and fork `seedLength` boundaries. Ledger schema v2 automatically refolds stale cached totals from the authoritative session logs.
@@ -18,7 +20,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 
 ## What it gives you
 
-- **Per-conversation view**: the session's total cost is embedded directly into the official stats line at the bottom of the conversation (right after `TTFT avg … · … tok/s`); clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).
+- **Per-conversation view**: the session's total cost renders in the official `conversation.composer.dock` slot below the input, alongside speed and cache metrics; clicking it opens the per-request detail modal (time / model / cache miss / cache hit / output / cost, newest first).
 
 <p align="center">
   <img src="docs/screenshots/conversation-bottom.png" alt="Cost in the conversation stats line" width="90%">
@@ -28,7 +30,7 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
   <img src="docs/screenshots/cost-detail.png" alt="Cost detail modal" width="80%">
 </p>
 
-- **Overall summary** (Settings > Plugins > Plugin configuration > Token Cost): time-filtered totals with today / yesterday / last 7 days / last 30 days / this month / last month / custom (up to 30 days), grouped by model, session and day.
+- **Overall summary** (the Token Cost tab in Settings): time-filtered totals with today / yesterday / last 7 days / last 30 days / this month / last month / custom (up to 30 days), grouped by model, session and day.
 - **Pricing status**: peak windows shown and billed in UTC+8 (09:00–12:00, 14:00–18:00). From 2026-08-23, peak windows apply to workdays only (weekends are fully off-peak), which the UI labels as "Workdays only".
 - **Custom model prices**: Settings discovers unpriced models from the ledger, or you can add a model that has not been called yet. Enter per-1M cache-miss / cache-hit / output rates; **Add model** writes the local price file immediately (survives refresh) and history recalculates. Cache-hit may be left blank (billed as 0). Third-party models stay flat (DeepSeek peak/off-peak does not apply).
 
@@ -36,9 +38,9 @@ Token usage, cache hits and cost statistics for DeepSeek Harness (DSH) Web GUI �
 
 ## Data source
 
-The plugin reads DSH's durable session generations. Current v3 is `$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.v3.jsonl` (or `.zstd`); v2 `session.v2.jsonl(.zstd)`, v1 `session.v1.jsonl(.zstd)` and v0 `session.jsonl(.zstd)` remain supported. Migration can retain several immutable generations for one session, so the plugin selects the highest canonical numeric generation exactly once and never settles migrated copies twice. If that highest generation is newer than supported v3, it warns and skips the session instead of falling back to stale bytes.
+The plugin reads DSH's durable session generations. Current v4 is `$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.v4.jsonl` (or `.zstd`); v3 `session.v3.jsonl(.zstd)`, v2 `session.v2.jsonl(.zstd)`, v1 `session.v1.jsonl(.zstd)` and v0 `session.jsonl(.zstd)` remain supported. Migration can retain several immutable generations for one session, so the plugin selects the highest canonical numeric generation exactly once and never settles migrated copies twice. If that highest generation is newer than supported v4, it warns and skips the session instead of falling back to stale bytes.
 
-For v0/v1, top-level `assistant/chunk` and `assistant/message` carry usage. For v2/v3, `assistant/message.data.usage` wins, otherwise the last usage in `data.stream` is used; `assistant/attempt.data.stream` preserves failed or retried settlements. The v2/v3 reader accepts the official packed text/reasoning/tool-call run grammar while usage remains a raw `chunk` record inside that stream. Values replace within one attempt; only `llm/retry-started` opens the next billing slot for the same turn/step. `compaction/summary.usage` remains an independent call. Fork exclusion uses v0/v1 `seedLength` or the last v2/v3 `session/end-seed { inherited: true }` cut. The compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) only re-parses changed authoritative generations; ledger v5 invalidates older semantics. Custom prices live beside it in `custom-prices.json`, including an explicit `flat: false`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
+For v0/v1, top-level `assistant/chunk` and `assistant/message` carry usage. For v2/v3/v4, `assistant/message.data.usage` wins, otherwise the last usage in `data.stream` is used; `assistant/attempt.data.stream` preserves failed or retried settlements. The v2/v3/v4 reader accepts the official packed text/reasoning/tool-call run grammar while usage remains a raw `chunk` record inside that stream. Values replace within one attempt; only `llm/retry-started` opens the next billing slot for the same turn/step. `compaction/summary.usage` remains an independent call. Fork exclusion uses v0/v1 `seedLength` or the last v2/v3/v4 `session/end-seed { inherited: true }` cut. The compact ledger (`$DSH_HOME/storages/dsh-token-cost/ledger.json`) only re-parses changed authoritative generations; ledger v6 invalidates older semantics. Custom prices live beside it in `custom-prices.json`, including an explicit `flat: false`. zstd decoding uses [fzstd](https://github.com/101arrowz/fzstd) (pure JS, zero deps).
 
 Token fields follow the harness convention: `inputTokens` = cache-miss prompt tokens, `cacheReadTokens` = cache-hit prompt tokens (disjoint; together they are the billed input).
 
@@ -46,11 +48,11 @@ The upstream log remains the telemetry boundary: title generation, Web Search, i
 
 ### Supported SDK and log protocol boundary
 
-The declared host and browser SDK version is official npm `0.1.2-rc.1`, with development dependencies pinned to that version. The settings namespace uses the native `register` / `watch` contract from `@deepseek-ai/dsh-settings`; browser scope and card-slot types come from `dsh-client-ui-settings/client` and `dsh-client-ui-settings-plugins/client`. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
+The current host and browser SDK version is official npm `0.2.0-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. The v0.3.0 peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
 
 The v2 reader follows the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. Full installation and runtime acceptance on a `0.1.3-alpha.1` host remain incomplete; that host version is outside this package's declared peer range.
 
-V3 accounting was checked against official `dsh-v0.1.5-rc.2` ([`fb2c4b9`](https://github.com/deepseek-ai/deepseek-harness/commit/fb2c4b9e698e30edb738bca4cf0618587db7d203)). Its [codec](https://github.com/deepseek-ai/deepseek-harness/blob/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/session/session-format-v2-to-v3/src/codec.ts) reuses v2 encoding/decoding; migration preserves embedded streams and token counts. Inserted system messages and remapped inherited cuts add no billable calls. The minimal synthetic accounting fixture `tests/fixtures/session-v3-accounting.jsonl` and its zstd copy cover repeated inherited markers, system replacements, retries, duplicate usage representations and compaction: 3 records, input 43, output 16, cache-read 56, cache-write 9, reasoning 12. This is not full Session validation, host acceptance on `0.1.5-rc.2`, or provider-bill reconciliation; SDK peer versions remain unchanged.
+V3 accounting was checked against official `dsh-v0.1.5-rc.2` ([`fb2c4b9`](https://github.com/deepseek-ai/deepseek-harness/commit/fb2c4b9e698e30edb738bca4cf0618587db7d203)). Its [codec](https://github.com/deepseek-ai/deepseek-harness/blob/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/session/session-format-v2-to-v3/src/codec.ts) reuses v2 encoding/decoding; migration preserves embedded streams and token counts. Inserted system messages and remapped inherited cuts add no billable calls. The minimal synthetic accounting fixture `tests/fixtures/session-v3-accounting.jsonl` and its zstd copy cover repeated inherited markers, system replacements, retries, duplicate usage representations and compaction: 3 records, input 43, output 16, cache-read 56, cache-write 9, reasoning 12. This is not full Session validation, host acceptance on `0.1.5-rc.2`, or provider-bill reconciliation; That describes the original v3 reader validation; the current SDK baseline is stated above.
 
 The plugin continues to settle official `compaction/summary.usage` independently and excludes inherited fork prefixes from cross-session totals. It is not a substitute for a provider bill and cannot recover usage upstream never logged. Fields such as `compaction/end` still are not priced without an official usage schema. Repository tests use synthetic fixtures only; no real session log is published.
 
@@ -60,7 +62,7 @@ The plugin continues to settle official `compaction/summary.usage` independently
 dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 ```
 
-Use the official `@deepseek-ai/dsh@0.1.2-rc.1` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open Settings > Plugins > Plugin configuration > Token Cost. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
+Use the official `0.2.0-rc.2` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open the Token Cost tab in Settings. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
 
 ### Plugin Hub reports an installation timeout
 

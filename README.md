@@ -10,6 +10,8 @@
 
 DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计插件：单对话与整体汇总，内置 DeepSeek 官方计价方案（含 V4.1 Flash 降价与 V4 Pro 路由，东八区峰谷），也可为自己调用的其他模型填写单价。
 
+2026-10-08 更新：v0.3.0 适配 DeepSeek Harness `0.2.0-rc.2`。费用直接挂载到官方输入框底部插槽，修复新版界面不显示费用的问题；与相邻速度、缓存指标保持相同字体、字号和颜色，仅用虚线下划线提示可点击查看明细。同步新版设置接口（配置保存后即时生效）、session format v4 读取和 ledger v6 缓存重建。已在 macOS 桌面端核验费用显示、明细打开和会话切换。
+
 2026-08-17更新：支持为自己调用的其他模型填写单价；点「添加模型」即写入本地价格文件，刷新后仍在，历史费用立刻按新单价重算。
 
 2026-08-25 更新：计量内核升级为 attempt-aware fold，补齐失败调用后 retry、`compaction/summary.usage` 与 fork `seedLength` 边界；账本 schema 升至 v2，旧缓存会从权威 session logs 自动重折叠。
@@ -22,7 +24,7 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 ## 功能
 
-- **单对话视图**：对话页面底部官方状态行（「首 token 平均 … · … tok/s」之后）直接嵌入本会话消耗费用，点击即可打开按请求的明细弹窗（时间 / 模型 / 缓存未命中 / 缓存命中 / 输出 / 费用，最新在上）。
+- **单对话视图**：对话页面输入框底部通过官方 `conversation.composer.dock` 插槽显示本会话消耗费用，与速度、缓存指标并列，点击即可打开按请求的明细弹窗（时间 / 模型 / 缓存未命中 / 缓存命中 / 输出 / 费用，最新在上）。
 
 <p align="center">
   <img src="docs/screenshots/conversation-bottom.png" alt="对话底部状态行费用展示" width="90%">
@@ -32,7 +34,7 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
   <img src="docs/screenshots/cost-detail.png" alt="费用明细弹窗" width="80%">
 </p>
 
-- **整体汇总**（设置 > 插件 > 插件配置 > Token 费用统计）：时间筛选（今天 / 昨天 / 最近 7 天 / 最近 30 天 / 本月 / 上月 / 自定义，最多 30 天）+ 费用 / 输入 / 输出 / 缓存命中率统计卡，按模型、会话、日期分组。
+- **整体汇总**（设置中的「Token 费用统计」标签页）：时间筛选（今天 / 昨天 / 最近 7 天 / 最近 30 天 / 本月 / 上月 / 自定义，最多 30 天）+ 费用 / 输入 / 输出 / 缓存命中率统计卡，按模型、会话、日期分组。
 - **计价状态**：高峰时段按东八区显示（09:00–12:00、14:00–18:00），判定也按东八区时钟；2026-08-23 起峰时仅限工作日，周末整天按闲时，界面会标注「仅工作日」。
 - **自定义模型价格**：配置页可从账本发现未定价模型，或手动添加尚未调用的模型；按每百万 tokens 填写缓存未命中 / 缓存命中 / 输出。点「添加模型」即写入本地价格文件，刷新后仍在，历史记录立刻按新单价重算。缓存命中可不填（按 0 计）。第三方模型按平价，不受 DeepSeek 峰谷影响。
 
@@ -40,9 +42,9 @@ DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计�
 
 ## 数据来源
 
-插件读取 DSH 的持久会话 generation：当前 v3 为 `$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.v3.jsonl`（或 `.zstd`），并兼容 v2 的 `session.v2.jsonl(.zstd)`、v1 的 `session.v1.jsonl(.zstd)` 与 v0 的 `session.jsonl(.zstd)`。同一会话迁移后可能保留多代不可变文件；插件只选择数字版本最高的 canonical generation 一次，不重复结算迁移副本。若最高代高于已支持的 v3，插件明确告警并跳过该会话，不回退读取旧代。
+插件读取 DSH 的持久会话 generation：当前 v4 为 `$DSH_HOME/sessions/<project-key>/<encoded-session-id>/session.v4.jsonl`（或 `.zstd`），并兼容 v3 的 `session.v3.jsonl(.zstd)`、v2 的 `session.v2.jsonl(.zstd)`、v1 的 `session.v1.jsonl(.zstd)` 与 v0 的 `session.jsonl(.zstd)`。同一会话迁移后可能保留多代不可变文件；插件只选择数字版本最高的 canonical generation 一次，不重复结算迁移副本。若最高代高于已支持的 v4，插件明确告警并跳过该会话，不回退读取旧代。
 
-v0/v1 的顶层 `assistant/chunk` / `assistant/message` 与 v2/v3 的 `assistant/message.data.usage`（缺失时取 `data.stream` 最后一个 usage）/ `assistant/attempt.data.stream` 都折叠为按 attempt 的计费记录。v2/v3 stream 支持官方 packed text、reasoning、tool-call run 语法；usage 仍来自其中的 raw `chunk` record。同一次 attempt 内后值替换前值，只有 `llm/retry-started` 打开同一 turn/step 的下一计费槽；`compaction/summary.usage` 独立计入。fork 的 v0/v1 使用 `seedLength`，v2/v3 使用最后一个 `session/end-seed { inherited: true }` 的 cut，聚合时排除继承前缀。紧凑账本（`$DSH_HOME/storages/dsh-token-cost/ledger.json`）只重解析变化的权威 generation；ledger v5 会使旧口径缓存失效。自定义单价存在同目录的 `custom-prices.json`；显式 `flat: false` 会原样持久化。zstd 解压使用 fzstd（纯 JS 零依赖）。
+v0/v1 的顶层 `assistant/chunk` / `assistant/message` 与 v2/v3/v4 的 `assistant/message.data.usage`（缺失时取 `data.stream` 最后一个 usage）/ `assistant/attempt.data.stream` 都折叠为按 attempt 的计费记录。v2/v3/v4 stream 支持官方 packed text、reasoning、tool-call run 语法；usage 仍来自其中的 raw `chunk` record。同一次 attempt 内后值替换前值，只有 `llm/retry-started` 打开同一 turn/step 的下一计费槽；`compaction/summary.usage` 独立计入。fork 的 v0/v1 使用 `seedLength`，v2/v3/v4 使用最后一个 `session/end-seed { inherited: true }` 的 cut，聚合时排除继承前缀。紧凑账本（`$DSH_HOME/storages/dsh-token-cost/ledger.json`）只重解析变化的权威 generation；ledger v6 会使旧口径缓存失效。自定义单价存在同目录的 `custom-prices.json`；显式 `flat: false` 会原样持久化。zstd 解压使用 fzstd（纯 JS 零依赖）。
 
 Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cacheReadTokens` = 缓存命中部分（两者不相交，相加即计费输入）。
 
@@ -50,11 +52,11 @@ Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cac
 
 ### 支持版本与日志协议边界
 
-声明的宿主与浏览器 SDK 版本为官方 npm `0.1.2-rc.1`，编译依赖固定到该版本。设置 namespace 使用 `@deepseek-ai/dsh-settings` 的原生 `register` / `watch`，浏览器 scope 和卡片 slot 分别来自官方 `dsh-client-ui-settings/client` 与 `dsh-client-ui-settings-plugins/client`。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
+当前声明的宿主与浏览器 SDK 版本为官方 npm `0.2.0-rc.2`，编译依赖固定到该版本。宿主配置由原生 Config 生命周期管理；浏览器使用 `configForms` / `ConfigForm` 和 `settings.plugins.tab` 设置入口。v0.3.0 的 peer 范围针对该 SDK，不承诺旧版或任意未来版本的宿主兼容性。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
 
 v2 日志读取依据 DSH `0.1.3-alpha.1` 的固定源码快照 [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215)：session format v2 将每次 Assistant settlement 写为携带嵌入 stream 的 `assistant/message` 或 `assistant/attempt`，当前 generation 使用 `session.v2.jsonl(.zstd)`；迁移留下的 v0/v1 文件不是额外调用。`0.1.3-alpha.1` 宿主的完整安装与运行尚未验收；其版本不在本包声明的 peer 支持范围中。
 
-v3 口径核验固定在官方 `dsh-v0.1.5-rc.2`（[`fb2c4b9`](https://github.com/deepseek-ai/deepseek-harness/commit/fb2c4b9e698e30edb738bca4cf0618587db7d203)）：[v3 codec](https://github.com/deepseek-ai/deepseek-harness/blob/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/session/session-format-v2-to-v3/src/codec.ts) 复用 v2 编解码，迁移保留 embedded stream 与 token 数值，新增系统消息及重映射后的最后 inherited cut 不产生额外费用。`tests/fixtures/session-v3-accounting.jsonl` 及其 zstd 副本是最小合成计量样例，覆盖两次继承标记、系统消息替换、重试、重复 usage 表示和压缩摘要：手算 3 条计费记录，input 43、output 16、cache-read 56、cache-write 9、reasoning 12。它不代表完整 Session 校验器验收、`0.1.5-rc.2` 宿主兼容性或官方账单对账；SDK peer 版本保持不变。
+v3 口径核验固定在官方 `dsh-v0.1.5-rc.2`（[`fb2c4b9`](https://github.com/deepseek-ai/deepseek-harness/commit/fb2c4b9e698e30edb738bca4cf0618587db7d203)）：[v3 codec](https://github.com/deepseek-ai/deepseek-harness/blob/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/session/session-format-v2-to-v3/src/codec.ts) 复用 v2 编解码，迁移保留 embedded stream 与 token 数值，新增系统消息及重映射后的最后 inherited cut 不产生额外费用。`tests/fixtures/session-v3-accounting.jsonl` 及其 zstd 副本是最小合成计量样例，覆盖两次继承标记、系统消息替换、重试、重复 usage 表示和压缩摘要：手算 3 条计费记录，input 43、output 16、cache-read 56、cache-write 9、reasoning 12。它不代表完整 Session 校验器验收、`0.1.5-rc.2` 宿主兼容性或官方账单对账；这是 v3 读取器当时的验证边界；当前 SDK 基线见本节开头。
 
 本插件继续单独结算官方已经写入日志的 `compaction/summary.usage`，并在跨 session 汇总中排除 fork 继承前缀。这不代表插件能替代官方账单，也不扩大上游没有记录 usage 的遥测边界。`compaction/end` 等没有官方 usage schema 的字段仍不换算为费用；仓库测试只使用 synthetic fixture，不发布真实 session log。
 
@@ -64,7 +66,7 @@ v3 口径核验固定在官方 `dsh-v0.1.5-rc.2`（[`fb2c4b9`](https://github.co
 dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
 ```
 
-使用官方 `@deepseek-ai/dsh@0.1.2-rc.1` 宿主。安装与重启会修改指定 profile；重启其 `dsh web` 后，在设置 > 插件 > 插件配置中打开「Token 费用统计」。历史会话日志在首次查询时自动回填。已在 macOS 的独立官方宿主中验证插件设置入口、合成日志费用汇总、自定义单价保存及币种设置重启保留；真实模型回合和其他平台仍需单独验证。
+使用官方 `0.2.0-rc.2` 宿主。安装与重启会修改指定 profile；重启其 `dsh web` 后，在设置中打开「Token 费用统计」标签页。历史会话日志在首次查询时自动回填。已在 macOS 的独立官方宿主中验证插件设置入口、合成日志费用汇总、自定义单价保存及币种设置重启保留；真实模型回合和其他平台仍需单独验证。
 
 ### 插件中心提示安装超时
 

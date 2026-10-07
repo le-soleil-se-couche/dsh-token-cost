@@ -38,7 +38,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services (fiber inject waiting — the runtime must be up first). */
-export const inject = ['slots', 'locale', 'settingsScope']
+export const inject = ['slots', 'locale', 'configForms']
 
 /**
  * Mount the two dsh-token-cost surfaces: the composer-dock chip and the
@@ -48,7 +48,7 @@ export const inject = ['slots', 'locale', 'settingsScope']
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'token-cost: dictionaries')
 
-  const scope = ctx.settingsScope.bind<TokenCostSettings>({ namespace: TOKEN_COST_NS })
+  const scope = ctx.configForms.get<TokenCostSettings>(TOKEN_COST_NS)
 
   const disposers: Array<() => void> = []
   try {
@@ -59,9 +59,10 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: (): StatsCostBridgeFace => ({ settings: scope }),
     }, StatsCostBridge)))
-    disposers.push(ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-      name: 'settings.plugin.item',
-      key: TOKEN_COST_NS,
+    disposers.push(ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
+      name: 'settings.plugins.tab',
+      id: TOKEN_COST_NS,
+      label: () => ctx.locale.bind(NS)('card.title'),
       locale: NS,
       inject: (): TokenCostSettingsCardFace => ({ settings: scope }),
     }, TokenCostSettingsCard)))

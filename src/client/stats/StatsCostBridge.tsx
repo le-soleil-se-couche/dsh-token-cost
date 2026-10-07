@@ -1,11 +1,6 @@
 /**
- * Stats cost bridge: a renderless composer-dock entry that feeds the
- * official stats line with the current session's total cost.
- *
- * It renders nothing of its own (the dock row stays exactly as the shell
- * paints it); its effect polls the host session route and publishes the
- * formatted cost into the stats-line injector, which places it between the
- * speed group and the cache-hit group of the official line.
+ * Session cost entry rendered by the official composer dock. It owns its
+ * element instead of depending on the shell's editor or stats DOM shape.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -14,12 +9,7 @@ import type { SessionDetailResponse } from '../../protocol.ts'
 import { TokenCostApi } from '../api.ts'
 import { SessionDetailModal } from '../shared/SessionDetailModal.tsx'
 import { resolveSettings, useSettingsValue, type TokenCostSettingsScope } from '../settings-schema.ts'
-import {
-  formatCostText,
-  publishCostState,
-  registerDetailOpener,
-  startStatsLineInjector,
-} from './stats-line-injector.ts'
+import { formatMoney } from '../format.ts'
 
 /** The bridge's injected share: the bound settings scope for currency. */
 export interface StatsCostBridgeFace {
@@ -35,36 +25,42 @@ export type StatsCostBridgeProps =
 /** Poll interval for the session cost (same cadence as the shell's stats). */
 const POLL_MS = 10_000
 
-/** Renderless bridge: data flows into the stats line, nothing is painted. */
+/** Poll the active session and render its cost alongside the native metrics. */
 export function StatsCostBridge(props: StatsCostBridgeProps) {
   const { sessionId } = props
   const raw = useSettingsValue(props.settings)
   const { enabled, currency } = resolveSettings(raw)
   const apiRef = useRef<TokenCostApi | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [result, setResult] = useState<{
+    sessionId: string
+    currency: 'cny' | 'usd'
+    text: string
+    available: boolean
+  } | null>(null)
 
   useEffect(() => {
-    startStatsLineInjector()
-    registerDetailOpener((id) => { setOpenId(id) })
-    publishCostState({ costText: '', disabled: !enabled })
+    setResult(null)
+    setOpenId(null)
     if (!enabled) return
     let alive = true
     const api = new TokenCostApi()
     apiRef.current = api
     const load = (): void => {
       api.session(sessionId).then((response: SessionDetailResponse) => {
-        if (!alive || !response.ok) return
+        if (!alive) return
+        if (!response.ok) throw new Error('Cost response unavailable')
         const unpricedOnly = response.priced === 0 && response.totals.records > 0
-        publishCostState({
-          costText: unpricedOnly
+        setResult({
+          text: unpricedOnly
             ? (currency === 'cny' ? '未知' : 'n/a')
-            : formatCostText(response.totals.costCny, response.totals.costUsd, currency),
-          disabled: false,
+            : formatMoney(currency === 'cny' ? response.totals.costCny : response.totals.costUsd, currency),
+          available: true,
           sessionId,
           currency,
         })
       }).catch(() => {
-        // Transient host states self-heal on the next poll.
+        if (alive) setResult({ sessionId, currency, text: currency === 'cny' ? '暂不可用' : 'unavailable', available: false })
       })
     }
     load()
@@ -72,12 +68,35 @@ export function StatsCostBridge(props: StatsCostBridgeProps) {
     return () => {
       alive = false
       clearInterval(timer)
-      publishCostState({ costText: '', disabled: false })
     }
   }, [sessionId, enabled, currency])
 
+  if (!enabled) return null
+  const activeResult = result?.sessionId === sessionId && result.currency === currency ? result : null
+  const label = props.t('stats.cost', { cost: activeResult?.text ?? '…' })
+
   return (
     <>
+      <button
+        type="button"
+        data-dsh-token-cost-price="group"
+        title={props.t('detail.title')}
+        aria-label={label}
+        disabled={!activeResult?.available}
+        onClick={() => { setOpenId(sessionId) }}
+        style={{
+          display: 'inline-flex', alignItems: 'center', boxSizing: 'border-box',
+          border: 0, padding: '1px 8px', background: 'transparent',
+          color: 'var(--dsw-alias-label-tertiary)', fontFamily: 'inherit',
+          fontSize: 'calc(var(--dsh-content-font-size-secondary, 13px) - 1px)',
+          lineHeight: 'calc(20px + var(--dsh-content-font-delta-secondary, 0px))',
+          fontWeight: 'inherit', fontStyle: 'inherit', fontVariantNumeric: 'tabular-nums',
+          textDecoration: 'underline dotted', textUnderlineOffset: '3px',
+          cursor: activeResult?.available ? 'pointer' : 'default', whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </button>
       {openId !== null ? (
         <SessionDetailModal
           sessionId={openId}

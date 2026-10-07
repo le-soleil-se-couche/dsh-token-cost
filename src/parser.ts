@@ -16,7 +16,7 @@ export interface ParsedSession {
 }
 
 /** Session generations whose released accounting grammar this parser knows. */
-export const SUPPORTED_SESSION_FORMAT_VERSIONS = [0, 1, 2, 3] as const
+export const SUPPORTED_SESSION_FORMAT_VERSIONS = [0, 1, 2, 3, 4] as const
 type SupportedSessionFormatVersion = (typeof SUPPORTED_SESSION_FORMAT_VERSIONS)[number]
 
 /** Stable base key shared by every provider attempt of one loop step. */
@@ -31,7 +31,7 @@ function objectRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function supportedVersion(value: unknown): SupportedSessionFormatVersion {
-  if (value === 0 || value === 1 || value === 2 || value === 3) return value
+  if (value === 0 || value === 1 || value === 2 || value === 3 || value === 4) return value
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
     throw new Error(`unsupported session format version v${value}`)
   }

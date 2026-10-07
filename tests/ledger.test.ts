@@ -16,7 +16,7 @@ const FIXTURE_MISSING_HEADER = join(__dirname, 'fixtures', 'missing-session-head
 const FIXTURE_MISSING_ID = join(__dirname, 'fixtures', 'missing-session-id.jsonl.zstd')
 const FIXTURE_ESCAPED_ID = join(__dirname, 'fixtures', 'escaped-session-id.jsonl.zstd')
 
-function plainSession(version: 0 | 1 | 2 | 3, id: string, inputTokens: number): string {
+function plainSession(version: 0 | 1 | 2 | 3 | 4, id: string, inputTokens: number): string {
   const header = version >= 2
     ? { type: 'session', version, id, createdAt: 1, isSeeded: false, delegationDepth: 0 }
     : { type: 'session', version, id, createdAt: 1, delegationDepth: 0 }
@@ -111,7 +111,7 @@ describe('SessionLedger', () => {
     try {
       const ledger = new SessionLedger(root, 'ledger.json')
       expect(await ledger.sync()).toMatchObject({ sessionCount: 1, recordCount: 1 })
-      expect(readFileSync(join(root, 'ledger.json'), 'utf8')).toContain('"version":5')
+      expect(readFileSync(join(root, 'ledger.json'), 'utf8')).toContain('"version":6')
     } finally {
       process.chdir(previousCwd)
     }
@@ -198,7 +198,7 @@ describe('SessionLedger', () => {
     }
   })
 
-  it.each([2, 3] as const)('selects the highest canonical generation once and reads raw v%s JSONL', async (version) => {
+  it.each([2, 3, 4] as const)('selects the highest canonical generation once and reads raw v%s JSONL', async (version) => {
     const root = mkdtempSync(join(tmpdir(), 'token-cost-generation-test-'))
     const dir = join(root, '--tmp--', 'session-generation')
     const { mkdirSync } = await import('node:fs')
@@ -207,13 +207,14 @@ describe('SessionLedger', () => {
     writeFileSync(join(dir, 'session.v1.jsonl'), plainSession(1, 'session-generation', 200), 'utf8')
     writeFileSync(join(dir, 'session.v2.jsonl'), plainSession(2, 'session-generation', 300), 'utf8')
 
-    if (version === 3) writeFileSync(join(dir, 'session.v3.jsonl'), plainSession(3, 'session-generation', 400), 'utf8')
+    if (version >= 3) writeFileSync(join(dir, 'session.v3.jsonl'), plainSession(3, 'session-generation', 400), 'utf8')
+    if (version === 4) writeFileSync(join(dir, 'session.v4.jsonl'), plainSession(4, 'session-generation', 500), 'utf8')
 
     const ledger = new SessionLedger(root, join(root, 'ledger.json'))
     expect(await ledger.sync()).toMatchObject({ sessionCount: 1, recordCount: 1 })
     expect(ledger.session('session-generation')!.records[0]).toMatchObject({
       model: `model-v${version}`,
-      inputTokens: version === 3 ? 400 : 300,
+      inputTokens: (version + 1) * 100,
     })
   })
 
@@ -238,8 +239,8 @@ describe('SessionLedger', () => {
     const ledger = new SessionLedger(root, join(root, 'ledger.json'))
     expect(await ledger.sync()).toMatchObject({ sessionCount: 1, recordCount: 1 })
 
-    writeFileSync(join(dir, 'session.v4.jsonl'), JSON.stringify({
-      type: 'session', version: 4, id: 'session-future', createdAt: 1,
+    writeFileSync(join(dir, 'session.v5.jsonl'), JSON.stringify({
+      type: 'session', version: 5, id: 'session-future', createdAt: 1,
     }) + '\n', 'utf8')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -247,7 +248,7 @@ describe('SessionLedger', () => {
       expect(await ledger.sync()).toMatchObject({ sessionCount: 0, recordCount: 0 })
       expect(ledger.session('session-future')).toBeUndefined()
       expect(warn).toHaveBeenCalledOnce()
-      expect(String(warn.mock.calls[0]?.[1])).toContain('unsupported session format version v4')
+      expect(String(warn.mock.calls[0]?.[1])).toContain('unsupported session format version v5')
     } finally {
       warn.mockRestore()
     }
@@ -276,7 +277,7 @@ describe('SessionLedger', () => {
     }
   })
 
-  it('invalidates a version-4 ledger and persists a version-5 refold', async () => {
+  it.each([4, 5])('invalidates a version-%s ledger and persists a version-6 refold', async (version) => {
     const root = mkdtempSync(join(tmpdir(), 'token-cost-ledger-version-test-'))
     const dir = join(root, '--tmp--', 'session-abc')
     const ledgerPath = join(root, 'ledger.json')
@@ -286,7 +287,7 @@ describe('SessionLedger', () => {
     copyFileSync(FIXTURE_A, file)
     const info = statSync(file)
     writeFileSync(ledgerPath, JSON.stringify({
-      version: 4,
+      version,
       sessions: {
         'session-abc': {
           file,
@@ -320,6 +321,6 @@ describe('SessionLedger', () => {
     const ledger = new SessionLedger(root, ledgerPath)
     await ledger.sync()
     expect(ledger.session('session-abc')!.records[0]!.inputTokens).toBe(100)
-    expect(JSON.parse(readFileSync(ledgerPath, 'utf8')).version).toBe(5)
+    expect(JSON.parse(readFileSync(ledgerPath, 'utf8')).version).toBe(6)
   })
 })
