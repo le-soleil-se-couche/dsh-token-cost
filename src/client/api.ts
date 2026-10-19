@@ -1,10 +1,11 @@
 /**
  * Browser-side API client for the /api/dsh-token-cost route family — the only
- * data access path the surfaces use. Plain fetch, same origin, loopback fence
- * enforced by the host.
+ * data access path the surfaces use. Desktop supplies a carrier; web uses
+ * same-origin fetch. Connection enforces authentication and owner access.
  */
 
 import { TOKEN_COST_API } from '../protocol.ts'
+import type { ClientTransportHooks } from '@deepseek-ai/dsh-client-connection/client'
 import type {
   ModelsResponse,
   SavePricesResponse,
@@ -21,6 +22,17 @@ export class TokenCostApiError extends Error {
     super(message)
     this.name = 'TokenCostApiError'
   }
+}
+
+/** Use the shell's carrier on file:// pages and preserve web proxy mounts. */
+function hostFetch(path: string, init: RequestInit): Promise<Response> {
+  const transport = (globalThis as typeof globalThis & {
+    __DSH_TRANSPORT__?: ClientTransportHooks
+  }).__DSH_TRANSPORT__
+  const relative = path.replace(/^\//, '')
+  return transport?.fetch !== undefined
+    ? transport.fetch(relative, init)
+    : globalThis.fetch(relative, init)
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -42,39 +54,40 @@ async function readJson<T>(response: Response): Promise<T> {
 /** One client instance per surface (stateless; cheap to construct). */
 export class TokenCostApi {
   async status(): Promise<StatusResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/status`, { headers: { accept: 'application/json' } })
+    const response = await hostFetch(`${TOKEN_COST_API}/status`, { headers: { accept: 'application/json' } })
     return readJson<StatusResponse>(response)
   }
 
   async summary(from: number, to: number, tzOffsetMinutes?: number): Promise<SummaryResponse> {
     const query = new URLSearchParams({ from: String(from), to: String(to) })
     if (tzOffsetMinutes !== undefined) query.set('tz', String(tzOffsetMinutes))
-    const response = await fetch(`${TOKEN_COST_API}/summary?${query}`, { headers: { accept: 'application/json' } })
+    const response = await hostFetch(`${TOKEN_COST_API}/summary?${query}`, { headers: { accept: 'application/json' } })
     return readJson<SummaryResponse>(response)
   }
 
   async sessions(): Promise<SessionsResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/sessions`, { headers: { accept: 'application/json' } })
+    const response = await hostFetch(`${TOKEN_COST_API}/sessions`, { headers: { accept: 'application/json' } })
     return readJson<SessionsResponse>(response)
   }
 
   async session(id: string): Promise<SessionDetailResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/session/${encodeURIComponent(id)}`, { headers: { accept: 'application/json' } })
+    const query = new URLSearchParams({ id })
+    const response = await hostFetch(`${TOKEN_COST_API}/session?${query}`, { headers: { accept: 'application/json' } })
     return readJson<SessionDetailResponse>(response)
   }
 
   async resync(): Promise<ResyncResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/resync`, { method: 'POST' })
+    const response = await hostFetch(`${TOKEN_COST_API}/resync`, { method: 'POST' })
     return readJson<ResyncResponse>(response)
   }
 
   async models(): Promise<ModelsResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/models`, { headers: { accept: 'application/json' } })
+    const response = await hostFetch(`${TOKEN_COST_API}/models`, { headers: { accept: 'application/json' } })
     return readJson<ModelsResponse>(response)
   }
 
   async savePrices(customPrices: string): Promise<SavePricesResponse> {
-    const response = await fetch(`${TOKEN_COST_API}/prices`, {
+    const response = await hostFetch(`${TOKEN_COST_API}/prices`, {
       method: 'POST',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: JSON.stringify({ customPrices }),

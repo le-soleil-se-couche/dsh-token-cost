@@ -71,14 +71,15 @@ JSON 可覆盖/新增任意模型价格。配置页以表单编辑该字段：�
 
 ## 4. Host 半区（src/index.ts + ledger.ts + parser.ts + pricing.ts + routes.ts）
 
-- 服务注入：`webServer`；通过两代共有的 `SettingsProvider.register/watch` 可选绑定 `settings`，注册命名空间 `token-cost`
-- 路由（loopback 护栏，同 dsh-ssh）：
+- 服务注入：`connection`；使用原生 volatile Config 和 `token-cost` 命名空间，配置保存后立即生效。
+- 路由：通过 `ctx.connection.fetch.register` 注册精确路径，Connection 统一处理认证与 owner 权限，桌面端无需 WebServer。
   - `GET /api/dsh-token-cost/status`：ledger 统计 + 当前方案/下次切换
   - `GET /api/dsh-token-cost/summary?from&to&tz`：汇总（总 token/费用、按模型、按会话、按日）；`tz` 为客户端 UTC 偏移分钟，byDay 按客户端本地日切分（跨零点/时区切换正确）
   - `GET /api/dsh-token-cost/sessions`：会话列表
-  - `GET /api/dsh-token-cost/session/:id`：单会话记录 + 合计（弹窗/芯片用）
+  - `GET /api/dsh-token-cost/session?id=...`：单会话记录 + 合计（URLSearchParams 编解码 ID）
   - `GET /api/dsh-token-cost/models`：内置 / 自定义 / 未定价模型目录（配置页用）
   - `POST /api/dsh-token-cost/resync`：强制全量重扫
+  - `POST /api/dsh-token-cost/prices`：持久化自定义模型单价
 - 费用一律在 host 计算（价格引擎单一事实源），响应同时携带 cny/usd，客户端按设置显示
 
 ## 5. Browser 半区（src/client/）
@@ -86,17 +87,18 @@ JSON 可覆盖/新增任意模型价格。配置页以表单编辑该字段：�
 - `conversation.composer.dock`（官方 list 槽，scope session，自带 sessionId/useProjection）：
   注册「费用芯片」——轮询单会话汇总，显示 `≈¥0.12 · 缓存 68%`；点击弹单会话明细
   （记录表：时间/模型/输入(命中+未命中)/输出/费用；底部合计 + 缓存命中率）
-- `settings.plugin.item`（官方 ui-settings-plugins 声明的 keyed 槽）：设置卡片，三个 Tab
+- `settings.plugins.tab`（官方 ui-settings 声明，ui-settings-plugins 渲染）：设置卡片，三个 Tab
   - 汇总：筛选条（7 种预设 + 自定义日期）+ 4 张统计卡（费用/输入/输出/缓存命中率）
     + 按模型表 + 按会话表 + 每日趋势表
   - 会话：全部会话列表（点击打开明细弹窗，同单会话视图）
   - 配置：币种（cny/usd）、计价模式（auto/方案A/方案B）、自定义价格表
     （发现未定价模型 + 表单录入，底层仍写 customPrices JSON）、重新扫描按钮
 - 本地化 zh/en；格式化（金额、token 缩写 12.3K/1.2M）
+- API 通过 `__DSH_TRANSPORT__.fetch` 使用桌面宿主传输；普通 Web 页面回退到相对路径 fetch，保留反向代理挂载前缀。
 
 ## 6. 验证与发布
 
-- vitest 单测：parser（真实日志 fixture）、pricing（两方案边界时间、高峰/闲时）、ledger 增量
+- vitest：parser（合成日志 fixture）、pricing、ledger 增量、设置与 UI；Connection 集成覆盖无 WebServer 的传输、HTTP 认证、价格持久化、特殊 ID、卸载重载。
 - 构建：tsdown（shared/tsdown.client.ts 预设）> 安装 link 包 > 重启 dsh web > 路由 + UI 验证
 - 发布：README 中英双语（安装/配置/价格方案说明/免责声明）+ 提交 dsh-web-ui 家族仓库；
   npm publish 与 GitHub 需用户授权

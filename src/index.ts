@@ -9,7 +9,7 @@
 
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
@@ -23,7 +23,7 @@ import { makeRoutes } from './routes.ts'
 export const name = 'token-cost'
 
 /** Services required before the routes can mount. */
-export const inject = ['webServer']
+export const inject = ['connection']
 
 /**
  * Settings namespace of the token-cost capability — the section the web
@@ -65,7 +65,7 @@ function resolveDshHome(): string {
 
 /**
  * Mount the ledger, routes, and the settings section.
- * @param ctx - host plugin context carrying webServer.
+ * @param ctx - host plugin context carrying the shared Connection registry.
  * @param config - resolved plugin config (schema defaults applied by the loader).
  */
 export function apply(ctx: Context, config: Config = Config({})): void {
@@ -103,8 +103,14 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     disposeRoutes = ctx.effect(
       () => {
         const routes = makeRoutes({ ledger, pricing, schemes, customPrices, priceStore })
-        const disposers = routes.map((route) => ctx.webServer.register(route))
-        return () => { for (const dispose of disposers) dispose() }
+        const disposers = routes.map((route) => ctx.connection.fetch.register({
+          ...route,
+          async fetch(request) {
+            await priceStore.whenReady()
+            return route.fetch(request)
+          },
+        }))
+        return async () => { await Promise.all(disposers.map((dispose) => dispose())) }
       },
       'dsh-token-cost: routes',
     )
@@ -116,5 +122,6 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     if (paths.some((path) => path[0] === 'enabled')) rebuild()
   })
   rebuild()
-  void priceStore.whenReady().then(() => { rebuild() })
+  // Reads wait for the store themselves; avoid remounting asynchronously after
+  // a rapid unload or racing a live enabled update with a second registration.
 }

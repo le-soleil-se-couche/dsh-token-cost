@@ -1,5 +1,9 @@
 # dsh-token-cost
 
+This compatibility release is based on [le-soleil-se-couche/dsh-token-cost](https://github.com/le-soleil-se-couche/dsh-token-cost), commit `5a3f7cb`, and retains its BSD-3-Clause declaration. Package version: `0.3.1-dsh.0.2.1-rc.2`.
+
+2026-10-19: targets official DSH `0.2.1-rc.2`, Cordis `4.0.5`, and Schemastery `3.18.5`. Routes now use the authenticated, owner-only Connection Fetch registry. Desktop uses its supplied transport; Web uses relative fetch URLs that preserve reverse-proxy mounts. Session details use `/api/dsh-token-cost/session?id=...`, including encoded IDs. Custom prices are loaded before answering requests. Removed the unused, unpublished `dsh-invariants` dependency and fixed Windows fixture paths/newlines.
+
 <p align="center">
   <strong>English</strong> · <a href="README.md">中文</a>
 </p>
@@ -48,7 +52,7 @@ The upstream log remains the telemetry boundary: title generation, Web Search, i
 
 ### Supported SDK and log protocol boundary
 
-The current host and browser SDK version is official npm `0.2.0-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. The v0.3.0 peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
+The current host and browser SDK version is official npm `0.2.1-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. This adaptation’s peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
 
 The v2 reader follows the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. Full installation and runtime acceptance on a `0.1.3-alpha.1` host remain incomplete; that host version is outside this package's declared peer range.
 
@@ -58,19 +62,23 @@ The plugin continues to settle official `compaction/summary.usage` independently
 
 ## Installation
 
+Requires DSH `0.2.1-rc.2`. This is a community compatibility release from the [kslz fork](https://github.com/kslz/dsh-token-cost); the [upstream project](https://github.com/le-soleil-se-couche/dsh-token-cost) retains the original authorship. Download the prebuilt archive from [GitHub Releases](https://github.com/kslz/dsh-token-cost/releases/tag/v0.3.1-dsh.0.2.1-rc.2), or paste its download URL into the desktop Plugin Manager, then enable the plugin and restart the app.
+
 ```sh
-dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
+dsh plugin --profile desktop add https://github.com/kslz/dsh-token-cost/releases/download/v0.3.1-dsh.0.2.1-rc.2/deepseek-ai-dsh-token-cost-0.3.1-dsh.0.2.1-rc.2.tgz
 ```
 
-Use the official `0.2.0-rc.2` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open the Token Cost tab in Settings. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
+For the Web app, replace `desktop` with `web` and restart `dsh web`. If `dsh` is not on PATH, use the desktop application's bundled CLI at `resources/runtime/cli/bin/dsh.cmd`. A downloaded archive's absolute local path is also accepted. Open Settings > Built-in plugins > Token Cost; session cost also appears below the composer. Logs are backfilled on first query.
 
-### Plugin Hub reports an installation timeout
+To build and install from the pinned source tag:
 
-`Request timed out: GitHub may be unreachable or the network is unstable` is a Plugin Hub request timeout. That message alone does not establish a plugin build failure. A GitHub installation also downloads build dependencies and runs `prepare`; inspect the complete terminal output.
+```sh
+dsh plugin --profile desktop add github:kslz/dsh-token-cost#v0.3.1-dsh.0.2.1-rc.2
+```
 
-Record `dsh --version`, `node --version`, and `pnpm --version`, then run `git ls-remote https://github.com/le-soleil-se-couche/dsh-token-cost.git HEAD` to check GitHub connectivity. Run the installation command above in your own test profile and retain the complete output from the first error through process exit, including the exit code.
+The package keeps the original package ID, settings namespace and storage directory to preserve existing prices. Update an existing installation rather than loading two copies. Pricing is inherited from upstream; third-party models need custom rates. Estimates are not provider invoices.
 
-If GitHub cannot be reached, resolve connectivity first. For `prepare`, TypeScript, or peer dependency errors, attach the relevant error and host version to the issue. Remove tokens, authentication URLs, proxy credentials, and personal paths before sharing logs. Keep the working profile when installation fails; verify the repair in a test profile before updating it.
+Validation uses the official SDK on Windows: 105 passing tests cover parser/pricing/UI behavior, real Connection registries without a Web server, authenticated HTTP requests, custom-price persistence, escaped session IDs and unload/reload. The archive was installed in an isolated official 0.2.1-rc.2 Web profile, where the dashboard loaded with no browser errors. A Windows desktop user also reported this build working on DSH 0.2.1-rc.2. Automated verification makes no paid model calls.
 
 ## Built-in schemes
 
@@ -107,7 +115,7 @@ pnpm build
 pnpm pack
 ```
 
-The development baseline is Node.js `22.22.1` and pnpm `9.15.9`. Git installation runs `prepare` to build both JavaScript and declarations. The source checkout includes `src/`, `build/`, tests, and the lockfile; the install archive contains `lib/`, the bundle patch, and both READMEs. Entries are `lib/index.js` for the host and `lib/client.js` for the browser (`window.__ModuleLoader__.load` factory), with declarations at `lib/types/index.d.ts` and `lib/types/client/index.d.ts`. Use `npm pack --dry-run --ignore-scripts` to inspect the package file list after building.
+The development baseline is Node.js `24.21.0` and pnpm `9.15.9`. Git installation runs `prepare` to build both JavaScript and declarations. The source checkout includes `src/`, `build/`, tests, and the lockfile; the install archive contains `lib/`, the bundle patch, and both READMEs. Entries are `lib/index.js` for the host and `lib/client.js` for the browser (`window.__ModuleLoader__.load` factory), with declarations at `lib/types/index.d.ts` and `lib/types/client/index.d.ts`. Use `npm pack --dry-run --ignore-scripts` to inspect the package file list after building.
 
 After a local build, install with `dsh plugin --profile web add link:/absolute/path/to/dsh-token-cost`. Installation and restart modify that profile, so select your own development profile.
 

@@ -78,7 +78,7 @@ function filesUnder(root: string): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) visit(path)
-      else files.push(relative(root, path))
+      else files.push(relative(root, path).replaceAll('\\', '/'))
     }
   }
   visit(root)

@@ -1,0 +1,3 @@
+# Keep plain fixtures byte-identical to their committed zstd counterparts.
+*.jsonl text eol=lf
+*.zstd binary
