@@ -1,13 +1,9 @@
 /**
- * The /api/dsh-token-cost route family: status, time-window summary, session
- * listing, per-session detail and resync. Every route carries the loopback
- * trust fence plus browser same-origin markers (same pattern as dsh-ssh):
- * these endpoints expose usage/cost facts, so LAN-exposed deployments must
- * not serve them.
+ * Exact Fetch routes shared by the desktop and Web Connection carriers.
+ * Connection authenticates requests and restricts these routes to owner Peers.
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type { ConnectionFetchRoute } from '@deepseek-ai/dsh-client-connection'
 import { buildModelCatalog, collectModelUsage } from './catalog.ts'
 import type { SessionLedger } from './ledger.ts'
 import { parseCustomPrices, PRICE_SCHEMES, priceRecord, totalsFor } from './pricing.ts'
@@ -34,56 +30,11 @@ export interface TokenCostRoutesDeps {
   priceStore: CustomPriceStore
 }
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => { chunks.push(chunk) })
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8').trim()
-      if (raw === '') {
-        resolve({})
-        return
-      }
-      try {
-        resolve(JSON.parse(raw) as unknown)
-      } catch (error) {
-        reject(error)
-      }
-    })
-    req.on('error', reject)
+function json(status: number, body: unknown): Response {
+  return Response.json(body, {
+    status,
+    headers: { 'referrer-policy': 'no-referrer', 'cache-control': 'no-store' },
   })
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'referrer-policy': 'no-referrer',
-  })
-  res.end(payload)
-}
-
-/** Loopback check plus browser same-origin markers. */
-function isLoopbackRequest(request: IncomingMessage): boolean {
-  const address = request.socket.remoteAddress
-  if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1') return false
-  const host = request.headers.host
-  if (typeof host !== 'string') return false
-  let hostUrl: URL
-  try {
-    hostUrl = new URL(`http://${host}`)
-  } catch {
-    return false
-  }
-  if (hostUrl.hostname !== '127.0.0.1' && hostUrl.hostname !== 'localhost' && hostUrl.hostname !== '[::1]') return false
-  if (request.headers['sec-fetch-site'] === 'cross-site') return false
-  const origin = request.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === hostUrl.host
-  } catch {
-    return false
-  }
 }
 
 function readQuery(url: URL): Record<string, string> {
@@ -139,28 +90,15 @@ export function dayLabelForTime(time: number, tzOffsetMinutes: number): string {
 }
 
 /** Build the route list. */
-export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
+export function makeRoutes(deps: TokenCostRoutesDeps): ConnectionFetchRoute[] {
   const { ledger } = deps
-
-  /** Fence + method check, writing the error response on failure. */
-  const guard = (req: IncomingMessage, res: ServerResponse, method: string): boolean => {
-    if (!isLoopbackRequest(req)) {
-      writeJson(res, 403, { error: 'forbidden: loopback-only' })
-      return false
-    }
-    if (req.method !== method) {
-      writeJson(res, 405, { error: `method not allowed: ${req.method}` })
-      return false
-    }
-    return true
-  }
 
   return [
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/status`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'GET')) return
+      methods: ['GET'],
+      fetch: async (req) => {
         await ledger.sync()
         const schemes = deps.schemes()
         const pricing = deps.pricing()
@@ -169,7 +107,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
           .filter((scheme) => scheme.effectiveFrom <= now)
           .at(-1)
         const next = schemes.find((scheme) => scheme.effectiveFrom > now)
-        writeJson(res, 200, {
+        return json(200, {
           ok: true,
           ledger: ledger.stats(),
           pricing: {
@@ -183,12 +121,12 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
       },
     },
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/summary`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'GET')) return
+      methods: ['GET'],
+      fetch: async (req) => {
         await ledger.sync()
-        const url = new URL(req.url ?? '/', 'http://localhost')
+        const url = new URL(req.url)
         const query = readQuery(url)
         const from = queryNumber(query, 'from', 0)
         const to = queryNumber(query, 'to', Number.MAX_SAFE_INTEGER)
@@ -222,7 +160,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
           const label = dayLabelForTime(record.time, tzOffsetMinutes)
           return { key: label, label }
         }, schemes, pricing.priceMode)
-        writeJson(res, 200, {
+        return json(200, {
           ok: true,
           from,
           to,
@@ -236,10 +174,10 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
       },
     },
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/sessions`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'GET')) return
+      methods: ['GET'],
+      fetch: async (req) => {
         await ledger.sync()
         const pricing = deps.pricing()
         const schemes = deps.schemes()
@@ -256,21 +194,21 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
             }
           })
           .sort((a, b) => b.lastActivity - a.lastActivity)
-        writeJson(res, 200, { ok: true, sessions: rows })
+        return json(200, { ok: true, sessions: rows })
       },
     },
     {
-      kind: 'prefix',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/session`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'GET')) return
+      methods: ['GET'],
+      fetch: async (req) => {
         await ledger.sync()
-        const url = new URL(req.url ?? '/', 'http://localhost')
-        const id = url.pathname.slice(`${TOKEN_COST_API}/session/`.length)
+        const url = new URL(req.url)
+        const id = url.searchParams.get('id')
+        if (!id) return json(400, { ok: false, error: 'session id required' })
         const session = ledger.session(id)
         if (session === undefined) {
-          writeJson(res, 404, { ok: false, error: `no such session: ${id}` })
-          return
+          return json(404, { ok: false, error: `no such session: ${id}` })
         }
         const pricing = deps.pricing()
         const schemes = deps.schemes()
@@ -279,7 +217,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
           const cost = priceRecord(record, schemes, pricing.priceMode)
           return cost ?? { costCny: 0, costUsd: 0, schemeId: '', peak: null }
         })
-        writeJson(res, 200, {
+        return json(200, {
           ok: true,
           meta: session.meta,
           totals,
@@ -290,74 +228,70 @@ export function makeRoutes(deps: TokenCostRoutesDeps): WebRoute[] {
       },
     },
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/models`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'GET')) return
+      methods: ['GET'],
+      fetch: async (req) => {
         await deps.priceStore.whenReady()
         await ledger.sync()
         const records: UsageRecord[] = []
         for (const session of ledger.sessions()) records.push(...session.records)
-        writeJson(res, 200, {
+        return json(200, {
           ok: true,
           models: buildModelCatalog(collectModelUsage(records), deps.customPrices(), PRICE_SCHEMES),
         })
       },
     },
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/prices`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'POST')) return
+      methods: ['POST'],
+      fetch: async (req) => {
         let body: unknown
         try {
-          body = await readJsonBody(req)
+          body = await req.json()
         } catch {
-          writeJson(res, 400, { ok: false, error: 'invalid JSON body' })
-          return
+          return json(400, { ok: false, error: 'invalid JSON body' })
         }
         const raw = typeof body === 'object' && body !== null
           ? (body as { customPrices?: unknown }).customPrices
           : undefined
         if (typeof raw !== 'string') {
-          writeJson(res, 400, { ok: false, error: 'customPrices string required' })
-          return
+          return json(400, { ok: false, error: 'customPrices string required' })
         }
         let parsed: Record<string, ModelPrice>
         try {
           parsed = parseCustomPrices(raw)
         } catch (error) {
-          writeJson(res, 400, {
+          return json(400, {
             ok: false,
             error: error instanceof Error ? error.message : 'invalid custom prices',
           })
-          return
         }
         try {
           await deps.priceStore.replace(parsed)
         } catch (error) {
-          writeJson(res, 500, {
+          return json(500, {
             ok: false,
             error: error instanceof Error ? error.message : 'failed to persist prices',
           })
-          return
         }
         await ledger.sync()
         const records: UsageRecord[] = []
         for (const session of ledger.sessions()) records.push(...session.records)
-        writeJson(res, 200, {
+        return json(200, {
           ok: true,
           models: buildModelCatalog(collectModelUsage(records), deps.priceStore.get(), PRICE_SCHEMES),
         })
       },
     },
     {
-      kind: 'exact',
+      requestBody: 'buffered',
       path: `${TOKEN_COST_API}/resync`,
-      handler: async (req, res) => {
-        if (!guard(req, res, 'POST')) return
+      methods: ['POST'],
+      fetch: async (req) => {
         await ledger.sync(true)
-        writeJson(res, 200, { ok: true, ledger: ledger.stats() })
+        return json(200, { ok: true, ledger: ledger.stats() })
       },
     },
   ]

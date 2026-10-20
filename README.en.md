@@ -1,5 +1,9 @@
 # dsh-token-cost
 
+Version `0.4.0` targets official DSH `0.2.1-rc.2`, Cordis `4.0.5`, and Schemastery `3.18.5`. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+
+Routes use the authenticated, owner-only Connection Fetch registry. Desktop uses its supplied carrier; Web keeps relative URLs for reverse-proxy mounts. Session details use `/api/dsh-token-cost/session?id=...` with encoded IDs. Requests wait for persisted custom prices to load before responding.
+
 <p align="center">
   <strong>English</strong> · <a href="README.md">中文</a>
 </p>
@@ -48,7 +52,7 @@ The upstream log remains the telemetry boundary: title generation, Web Search, i
 
 ### Supported SDK and log protocol boundary
 
-The current host and browser SDK version is official npm `0.2.0-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. The v0.3.0 peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
+The current host and browser SDK version is official npm `0.2.1-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. This adaptation’s peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
 
 The v2 reader follows the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. Full installation and runtime acceptance on a `0.1.3-alpha.1` host remain incomplete; that host version is outside this package's declared peer range.
 
@@ -58,19 +62,28 @@ The plugin continues to settle official `compaction/summary.usage` independently
 
 ## Installation
 
+Requires DSH `0.2.1-rc.2`; source builds require Node.js `>=22.22.1` and pnpm `9.15.9`. Use the corresponding older plugin release for older DSH versions.
+
+Build an archive from this repository:
+
 ```sh
-dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
+pnpm install --ignore-scripts --frozen-lockfile
+pnpm pack
 ```
 
-Use the official `0.2.0-rc.2` host. Installation and restart modify the selected profile. Restart its `dsh web`, then open the Token Cost tab in Settings. Existing session logs are backfilled on the first query. An isolated official host on macOS has verified the plugin settings entry, synthetic-log cost totals, custom-price persistence, and currency settings surviving a host restart; real model rounds and other platforms require separate verification.
+`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.4.0.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
 
-### Plugin Hub reports an installation timeout
+For Web:
 
-`Request timed out: GitHub may be unreachable or the network is unstable` is a Plugin Hub request timeout. That message alone does not establish a plugin build failure. A GitHub installation also downloads build dependencies and runs `prepare`; inspect the complete terminal output.
+```sh
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.4.0.tgz
+```
 
-Record `dsh --version`, `node --version`, and `pnpm --version`, then run `git ls-remote https://github.com/le-soleil-se-couche/dsh-token-cost.git HEAD` to check GitHub connectivity. Run the installation command above in your own test profile and retain the complete output from the first error through process exit, including the exit code.
+Restart `dsh web`. Session costs appear below the composer; click for details. The Token Cost settings tab provides aggregate statistics. Historical logs are backfilled on first query.
 
-If GitHub cannot be reached, resolve connectivity first. For `prepare`, TypeScript, or peer dependency errors, attach the relevant error and host version to the issue. Remove tokens, authentication URLs, proxy credentials, and personal paths before sharing logs. Keep the working profile when installation fails; verify the repair in a test profile before updating it.
+Update the existing package rather than loading two copies. Package identity, settings namespace, ledger location and custom prices are preserved. With local `link:` installs, the profile's `package.json` dependency must point to the same build as the installed plugin link; replacing only `node_modules` lets the next package operation restore the old dependency.
+
+Estimates use recorded usage and configured rates; they are not provider invoices. Automated coverage includes the real SDK Desktop carrier, HTTP authentication, non-owner rejection, price persistence, escaped session IDs, unload/reload, and refreshed totals after new usage. Tests use synthetic records and publish no real session logs.
 
 ## Built-in schemes
 
@@ -107,7 +120,7 @@ pnpm build
 pnpm pack
 ```
 
-The development baseline is Node.js `22.22.1` and pnpm `9.15.9`. Git installation runs `prepare` to build both JavaScript and declarations. The source checkout includes `src/`, `build/`, tests, and the lockfile; the install archive contains `lib/`, the bundle patch, and both READMEs. Entries are `lib/index.js` for the host and `lib/client.js` for the browser (`window.__ModuleLoader__.load` factory), with declarations at `lib/types/index.d.ts` and `lib/types/client/index.d.ts`. Use `npm pack --dry-run --ignore-scripts` to inspect the package file list after building.
+The development baseline is Node.js `24.21.0` and pnpm `9.15.9`. Git installation runs `prepare` to build both JavaScript and declarations. The source checkout includes `src/`, `build/`, tests, and the lockfile; the install archive contains `lib/`, the bundle patch, and both READMEs. Entries are `lib/index.js` for the host and `lib/client.js` for the browser (`window.__ModuleLoader__.load` factory), with declarations at `lib/types/index.d.ts` and `lib/types/client/index.d.ts`. Use `npm pack --dry-run --ignore-scripts` to inspect the package file list after building.
 
 After a local build, install with `dsh plugin --profile web add link:/absolute/path/to/dsh-token-cost`. Installation and restart modify that profile, so select your own development profile.
 

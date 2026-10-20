@@ -1,5 +1,9 @@
 # dsh-token-cost
 
+版本 `0.4.0` 面向官方 DSH `0.2.1-rc.2`，使用 Cordis `4.0.5`、Schemastery `3.18.5`。通信适配基于 [kslz 提交的 PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13)，并保留主分支的计费时间修复。
+
+费用 API 通过经过认证、仅限 owner 的 Connection Fetch 注册表提供；桌面端使用宿主传输，Web 端保留反向代理挂载路径。会话详情使用 `/api/dsh-token-cost/session?id=...`，支持特殊字符 ID。自定义价格加载完成后才回答请求，避免启动时把已有价格误当作空配置。
+
 <p align="center">
   <img src="docs/banner.png" alt="dsh-token-cost" width="100%">
 </p>
@@ -52,7 +56,7 @@ Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cac
 
 ### 支持版本与日志协议边界
 
-当前声明的宿主与浏览器 SDK 版本为官方 npm `0.2.0-rc.2`，编译依赖固定到该版本。宿主配置由原生 Config 生命周期管理；浏览器使用 `configForms` / `ConfigForm` 和 `settings.plugins.tab` 设置入口。v0.3.0 的 peer 范围针对该 SDK，不承诺旧版或任意未来版本的宿主兼容性。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
+当前声明的宿主与浏览器 SDK 版本为官方 npm `0.2.1-rc.2`，编译依赖固定到该版本。宿主配置由原生 Config 生命周期管理；浏览器使用 `configForms` / `ConfigForm` 和 `settings.plugins.tab` 设置入口。本适配版的 peer 范围针对该 SDK，不承诺旧版或任意未来版本的宿主兼容性。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
 
 v2 日志读取依据 DSH `0.1.3-alpha.1` 的固定源码快照 [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215)：session format v2 将每次 Assistant settlement 写为携带嵌入 stream 的 `assistant/message` 或 `assistant/attempt`，当前 generation 使用 `session.v2.jsonl(.zstd)`；迁移留下的 v0/v1 文件不是额外调用。`0.1.3-alpha.1` 宿主的完整安装与运行尚未验收；其版本不在本包声明的 peer 支持范围中。
 
@@ -62,19 +66,28 @@ v3 口径核验固定在官方 `dsh-v0.1.5-rc.2`（[`fb2c4b9`](https://github.co
 
 ## 安装
 
+宿主要求：DSH `0.2.1-rc.2`；本地构建要求 Node.js `>=22.22.1`、pnpm `9.15.9`。旧版 DSH 请使用对应的旧插件版本。
+
+从本仓库源码构建安装包：
+
 ```sh
-dsh plugin --profile web add github:le-soleil-se-couche/dsh-token-cost
+pnpm install --ignore-scripts --frozen-lockfile
+pnpm pack
 ```
 
-使用官方 `0.2.0-rc.2` 宿主。安装与重启会修改指定 profile；重启其 `dsh web` 后，在设置中打开「Token 费用统计」标签页。历史会话日志在首次查询时自动回填。已在 macOS 的独立官方宿主中验证插件设置入口、合成日志费用汇总、自定义单价保存及币种设置重启保留；真实模型回合和其他平台仍需单独验证。
+`pnpm pack` 会执行本包的 `prepare` 构建步骤，生成 `deepseek-ai-dsh-token-cost-0.4.0.tgz`。官方 Desktop 在「插件 → 添加插件」中选择该本地安装包，然后在运行中的会话和后台任务结束后，正常退出并重新打开应用。Desktop profile 由应用管理，不使用 Web CLI 命令修改它。
 
-### 插件中心提示安装超时
+Web profile 使用：
 
-`Request timed out: GitHub may be unreachable or the network is unstable` 是插件中心的请求超时提示，仅凭这段提示无法判断插件是否构建失败。GitHub 安装还会下载构建依赖并执行 `prepare`；请在终端中检查完整输出。
+```sh
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.4.0.tgz
+```
 
-先记录 `dsh --version`、`node --version` 和 `pnpm --version`，再执行 `git ls-remote https://github.com/le-soleil-se-couche/dsh-token-cost.git HEAD` 检查 GitHub 可达性。随后在自己的测试 profile 中运行上面的安装命令，并保留从首次错误到进程退出的完整输出及退出码。
+重启 `dsh web` 后，输入框下方显示会话费用，点击可查看明细；设置中的「Token 费用统计」提供整体汇总。历史日志在首次查询时回填。
 
-若 GitHub 无法连接，先处理网络连通性；若出现 `prepare`、TypeScript 或 peer dependency 错误，请将对应错误和宿主版本附到 Issue 中。分享日志前移除 Token、认证链接、代理凭证和个人路径。安装失败时保留现有可用 profile，通过测试 profile 验证修复后再更新。
+已有安装应更新同一个包，避免同时加载两个副本。本版本保留包名、设置命名空间、账本目录及自定义价格文件。使用本地 `link:` 安装时，profile 的 `package.json` 依赖声明必须与实际插件链接指向同一份构建；只替换 `node_modules` 会在下一次安装其他插件时被旧依赖声明还原。
+
+统计费用是按日志和配置单价计算的估算值，不替代服务商账单。自动测试覆盖真实 SDK 的 Desktop carrier、HTTP 认证、非 owner 拒绝、价格持久化、特殊字符会话 ID、卸载重载，以及新增 usage 的汇总和刷新；测试使用合成记录，不发布真实会话日志。
 
 ## 内置计价方案
 
@@ -111,7 +124,7 @@ pnpm build
 pnpm pack
 ```
 
-开发基线为 Node.js `22.22.1` 和 pnpm `9.15.9`。Git 安装的 `prepare` 会同时生成 JavaScript 与声明文件。源码 checkout 保留 `src/`、`build/`、测试和锁文件；安装包只携带 `lib/`、bundle patch 与双语说明。宿主入口为 `lib/index.js`，浏览器入口为 `lib/client.js`（`window.__ModuleLoader__.load` factory），声明入口为 `lib/types/index.d.ts` 与 `lib/types/client/index.d.ts`。打包前可通过 `npm pack --dry-run --ignore-scripts` 检查清单。
+开发基线为 Node.js `24.21.0` 和 pnpm `9.15.9`。Git 安装的 `prepare` 会同时生成 JavaScript 与声明文件。源码 checkout 保留 `src/`、`build/`、测试和锁文件；安装包只携带 `lib/`、bundle patch 与双语说明。宿主入口为 `lib/index.js`，浏览器入口为 `lib/client.js`（`window.__ModuleLoader__.load` factory），声明入口为 `lib/types/index.d.ts` 与 `lib/types/client/index.d.ts`。打包前可通过 `npm pack --dry-run --ignore-scripts` 检查清单。
 
 本地构建后可用 `dsh plugin --profile web add link:/absolute/path/to/dsh-token-cost` 安装到指定 profile。安装和重启会修改该 profile，请选择自己的开发 profile。
 
