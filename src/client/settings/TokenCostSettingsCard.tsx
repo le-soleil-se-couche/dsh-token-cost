@@ -1,7 +1,7 @@
 /**
  * The dsh-token-cost settings card: the summary dashboard (time-filtered
  * totals, grouped tables), the per-session browser, and the pricing/alias
- * configuration. Registers into the official `settings.plugin.item` slot
+ * configuration. Registers into the official `settings.plugins.tab` slot
  * rendered in Settings > Plugins > Plugin configuration.
  */
 

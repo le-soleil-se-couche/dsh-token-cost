@@ -38,6 +38,7 @@ describe('official composer dock cost', () => {
   })
   afterEach(async () => {
     await act(async () => { root.unmount() })
+    vi.useRealTimers()
     vi.restoreAllMocks()
     document.body.innerHTML = ''
   })
@@ -82,5 +83,16 @@ describe('official composer dock cost', () => {
     await render('a', false)
     expect(box.textContent).toBe('')
     expect(api).toHaveBeenCalledOnce()
+  })
+  it('refreshes settled usage on the next poll without remounting the conversation', async () => {
+    vi.useFakeTimers()
+    const api = vi.spyOn(TokenCostApi.prototype, 'session')
+      .mockResolvedValueOnce(response(1))
+      .mockResolvedValue(response(2.5))
+    await render()
+    expect(box.textContent).toBe('费用 ¥1.00')
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(box.textContent).toBe('费用 ¥2.50')
+    expect(api).toHaveBeenCalledTimes(2)
   })
 })

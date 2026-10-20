@@ -14,11 +14,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: renderer owns ctx.slots; session owns the sessionId standard prop.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
-// Type-only: pulls the conversation slot declaration and settingsScope service.
+// Type-only: pulls the conversation/settings slot declarations and ConfigForms.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: the official keyed settings-card slot belongs to its declarer.
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { StatsCostBridge, type StatsCostBridgeFace } from './stats/StatsCostBridge.tsx'
 import { en, zh, type TokenCostKey } from './locales.ts'
 import {

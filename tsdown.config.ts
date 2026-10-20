@@ -11,7 +11,7 @@ import { clientBundle } from './build/tsdown.client.ts'
 
 export default clientBundle('@deepseek-ai/dsh-token-cost', ['src/index.ts'], {
   libExternal: [
-    '@deepseek-ai/dsh-host-webserver',
+    '@deepseek-ai/dsh-client-connection',
     '@deepseek-ai/dsh-settings',
     '@deepseek-ai/schemastery',
   ],

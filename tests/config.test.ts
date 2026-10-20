@@ -1,13 +1,12 @@
 /** SDK 0.2 form projection and live config updates, without any real profile I/O. */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { SettingsForms } from '@deepseek-ai/dsh-settings'
-import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type { ConnectionFetchRoute } from '@deepseek-ai/dsh-client-connection'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, Config, inject, name } from '../src/index.ts'
 import type { ModelPrice, PriceScheme } from '../src/protocol.ts'
@@ -47,14 +46,14 @@ async function harness(raw: Record<string, unknown> = {}) {
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const ctx = new Context()
   cleanups.push(() => ctx.fiber.dispose())
-  const routes = new Map<string, WebRoute>()
-  ctx.provide('webServer', {
-    register(route: WebRoute) {
+  const routes = new Map<string, ConnectionFetchRoute>()
+  ctx.provide('connection', { fetch: {
+    register(route: ConnectionFetchRoute) {
       if (routes.has(route.path)) throw new Error(`duplicate route: ${route.path}`)
       routes.set(route.path, route)
-      return () => { routes.delete(route.path) }
+      return async () => { routes.delete(route.path) }
     },
-  })
+  } })
   ctx.provide('profileContext', { home: dir })
   const loader = new Loader(ctx)
   await Promise.all([...ctx.registry.values()].flatMap((runtime) => [...runtime.fibers]).map((fiber) => fiber.await()))
@@ -89,23 +88,12 @@ async function harness(raw: Record<string, unknown> = {}) {
   return { settings, entry, run, routes, documentPath }
 }
 
-async function status(routes: Map<string, WebRoute>) {
+async function status(routes: Map<string, ConnectionFetchRoute>) {
   const route = routes.get('/api/dsh-token-cost/status')
   expect(route).toBeDefined()
-  let body = ''
-  const req = {
-    method: 'GET',
-    url: '/api/dsh-token-cost/status',
-    socket: { remoteAddress: '127.0.0.1' },
-    headers: { host: 'localhost' },
-  } as IncomingMessage
-  const res = {
-    writeHead: vi.fn(),
-    end(value: string) { body = value },
-  } as unknown as ServerResponse
-  await route!.handler(req, res)
-  expect(res.writeHead).toHaveBeenCalledWith(200, expect.anything())
-  return JSON.parse(body) as { pricing: { currency: string; priceMode: string; schemes: PriceScheme[] } }
+  const response = await route!.fetch(new Request('http://localhost/api/dsh-token-cost/status'))
+  expect(response.status).toBe(200)
+  return await response.json() as { pricing: { currency: string; priceMode: string; schemes: PriceScheme[] } }
 }
 
 describe('SDK 0.2 live configuration', () => {
