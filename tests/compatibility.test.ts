@@ -5,16 +5,16 @@ import { describe, expect, it } from 'vitest'
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const { engines: _engines, ...peerOnlyManifest } = manifest
 
-describe('DSH update compatibility', () => {
-  it.each(['0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1', '0.2.2-rc.1', '0.2.2', '0.2.99'])(
-    'keeps the plugin loadable on the supported 0.2.x line: %s',
+describe('DSH manifest admission (native updates also require interface checks)', () => {
+  it.each(['0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4', '0.2.1', '0.2.2-rc.1', '0.2.2', '0.2.99', '0.3.0-rc.1', '0.3.0', '0.9.9'])(
+    'allows the plugin compatibility logic to load on the declared 0.x family: %s',
     (runtimeVersion) => {
       expect(evaluatePluginCompatibility(manifest, {}, runtimeVersion)).toBeUndefined()
       expect(evaluatePluginCompatibility(peerOnlyManifest, {}, runtimeVersion)).toBeUndefined()
     },
   )
 
-  it.each(['0.2.0', '0.2.1-rc.1', '0.3.0-alpha.1', '0.3.0', '1.0.0'])(
+  it.each(['0.2.0', '0.2.1-rc.1', '1.0.0-alpha.1', '1.0.0'])(
     'requires a new compatibility review outside the supported line: %s',
     (runtimeVersion) => {
       expect(evaluatePluginCompatibility(manifest, {}, runtimeVersion)).toMatchObject({
