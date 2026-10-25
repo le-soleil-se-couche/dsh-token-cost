@@ -54,7 +54,7 @@ async function setup(withHttp = false) {
   return { ctx, plugin, handler, carrier, id, dir }
 }
 
-describe('DSH 0.2.1-rc.2 Connection integration', () => {
+describe('DSH 0.2.1 Connection integration', () => {
   it('serves all client operations without webServer, persists prices, and unloads cleanly', async () => {
     const { ctx, plugin, carrier, id, dir } = await setup()
     expect(ctx.get('webServer')).toBeUndefined()

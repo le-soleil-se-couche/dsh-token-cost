@@ -1,6 +1,6 @@
 # dsh-token-cost
 
-Version `0.4.0` targets official DSH `0.2.1-rc.2`, Cordis `4.0.5`, and Schemastery `3.18.5`. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+Version `0.4.1` uses the official DSH `0.2.1-rc.3` SDK, Cordis `4.0.5`, and Schemastery `3.18.5`. Its host and DSH peer range is `>=0.2.1-rc.2 <0.3.0-0`, fixing plugin rejection after a desktop RC update caused by an exact version pin. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
 
 Routes use the authenticated, owner-only Connection Fetch registry. Desktop uses its supplied carrier; Web keeps relative URLs for reverse-proxy mounts. Session details use `/api/dsh-token-cost/session?id=...` with encoded IDs. Requests wait for persisted custom prices to load before responding.
 
@@ -52,7 +52,7 @@ The upstream log remains the telemetry boundary: title generation, Web Search, i
 
 ### Supported SDK and log protocol boundary
 
-The current host and browser SDK version is official npm `0.2.1-rc.2`, with development dependencies pinned to that version. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. This adaptation’s peer range targets this SDK and does not promise compatibility with older or arbitrary future hosts. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
+Build and automated test dependencies are pinned to official npm `0.2.1-rc.3`; `engines.dsh` and DSH peers use `>=0.2.1-rc.2 <0.3.0-0`. The official DSH compatibility check includes prereleases, so later RCs in the same `0.2.x` line are not rejected solely for changing the version number. Prereleases of `0.3.0` and later versions require another compatibility review. This range expresses the support policy; future host API changes still need runtime validation. Host configuration uses the native Config lifecycle; the browser uses `configForms` / `ConfigForm` and the `settings.plugins.tab` entry. Building requires no DSH source checkout, old `dsh-client-runtime` package, or fabricated local declarations.
 
 The v2 reader follows the pinned DSH `0.1.3-alpha.1` source snapshot [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215). Session format v2 persists each Assistant settlement as an `assistant/message` or `assistant/attempt` with an embedded stream, and its current generation is `session.v2.jsonl(.zstd)`; retained v0/v1 migration sources are not additional calls. Full installation and runtime acceptance on a `0.1.3-alpha.1` host remain incomplete; that host version is outside this package's declared peer range.
 
@@ -62,7 +62,7 @@ The plugin continues to settle official `compaction/summary.usage` independently
 
 ## Installation
 
-Requires DSH `0.2.1-rc.2`; source builds require Node.js `>=22.22.1` and pnpm `9.15.9`. Use the corresponding older plugin release for older DSH versions.
+Supports DSH `>=0.2.1-rc.2 <0.3.0-0`, with current SDK validation on `0.2.1-rc.3`; source builds require Node.js `>=22.22.1` and pnpm `9.15.9`. Use the corresponding older plugin release for older DSH versions.
 
 Build an archive from this repository:
 
@@ -71,17 +71,19 @@ pnpm install --ignore-scripts --frozen-lockfile
 pnpm pack
 ```
 
-`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.4.0.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
+`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.4.1.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
 
 For Web:
 
 ```sh
-dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.4.0.tgz
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.4.1.tgz
 ```
 
 Restart `dsh web`. Session costs appear below the composer; click for details. The Token Cost settings tab provides aggregate statistics. Historical logs are backfilled on first query.
 
-Update the existing package rather than loading two copies. Package identity, settings namespace, ledger location and custom prices are preserved. With local `link:` installs, the profile's `package.json` dependency must point to the same build as the installed plugin link; replacing only `node_modules` lets the next package operation restore the old dependency.
+Update the existing package rather than loading two copies. Package identity, settings namespace, ledger location and custom prices are preserved. With local `link:` installs, the profile's `package.json`, `pnpm-lock.yaml`, and installed plugin link must point to the same build; replacing only `node_modules` lets the next package operation restore the old dependency.
+
+If the entry disappears after an upgrade, open this package under Plugins and check its version and error. An exact `engines.dsh 0.2.1-rc.2` requirement identifies the old `0.4.0` build; update to `0.4.1` and reload as directed by the application. This compatibility check rejects the package before executing it. Keep the ledger, custom prices, and session data.
 
 Estimates use recorded usage and configured rates; they are not provider invoices. Automated coverage includes the real SDK Desktop carrier, HTTP authentication, non-owner rejection, price persistence, escaped session IDs, unload/reload, and refreshed totals after new usage. Tests use synthetic records and publish no real session logs.
 
