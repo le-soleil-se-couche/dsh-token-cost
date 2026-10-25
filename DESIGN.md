@@ -98,7 +98,8 @@ JSON 可覆盖/新增任意模型价格。配置页以表单编辑该字段：�
 
 ## 6. 验证与发布
 
+- `engines.dsh` 与 DSH peer 兼容范围统一为 `>=0.2.1-rc.2 <0.3.0-0`，构建与自动测试 SDK 固定为 `0.2.1-rc.3`。兼容回归测试调用官方 `evaluatePluginCompatibility`，覆盖下一 RC 的接纳、旧版和 `0.3.0` 预发布版的拒绝；新的 SDK 接口变化仍需实际验证。
 - vitest：parser（合成日志 fixture）、pricing、ledger 增量、设置与 UI；Connection 集成覆盖无 WebServer 的传输、HTTP 认证、价格持久化、特殊 ID、卸载重载。
-- 构建：tsdown（shared/tsdown.client.ts 预设）> 安装 link 包 > 重启 dsh web > 路由 + UI 验证
-- 发布：README 中英双语（安装/配置/价格方案说明/免责声明）+ 提交 dsh-web-ui 家族仓库；
-  npm publish 与 GitHub 需用户授权
+- 构建：tsdown（`build/tsdown.client.ts` 预设）与 tsc 生成运行文件和声明；`pnpm pack` 生成 Desktop / Web 安装包。
+- 本地 `link:` 部署时，profile 的 manifest、lockfile 与实际链接保持一致；保留旧包用于回滚，更新后核对实际加载版本。费用账本和自定义价格独立于安装包保留。
+- 发布：在独立 `dsh-token-cost` 仓库同步中英 README 和必要设计说明，完成运行及用户视觉验收后按授权推送 GitHub。
