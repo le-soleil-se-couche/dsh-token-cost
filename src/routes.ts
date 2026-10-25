@@ -8,7 +8,7 @@ import { buildModelCatalog, collectModelUsage } from './catalog.ts'
 import type { SessionLedger } from './ledger.ts'
 import { parseCustomPrices, PRICE_SCHEMES, priceRecord, totalsFor } from './pricing.ts'
 import type { CustomPriceStore } from './price-store.ts'
-import type { CostGroupRow, ModelPrice, PriceScheme, UsageRecord } from './protocol.ts'
+import type { CostGroupRow, ModelPrice, PriceScheme, UpgradeProtection, UsageRecord } from './protocol.ts'
 import { TOKEN_COST_API } from './protocol.ts'
 
 /** Pricing facts resolved from plugin settings per request. */
@@ -28,6 +28,8 @@ export interface TokenCostRoutesDeps {
   customPrices: () => Record<string, ModelPrice>
   /** Persist custom prices independently of the settings document. */
   priceStore: CustomPriceStore
+  /** Current native Desktop installation guard, when this host provides it. */
+  upgradeProtection?: () => UpgradeProtection
 }
 
 function json(status: number, body: unknown): Response {
@@ -110,6 +112,7 @@ export function makeRoutes(deps: TokenCostRoutesDeps): ConnectionFetchRoute[] {
         return json(200, {
           ok: true,
           ledger: ledger.stats(),
+          ...deps.upgradeProtection === undefined ? {} : { upgradeProtection: deps.upgradeProtection() },
           pricing: {
             schemes,
             activeNow: active?.id ?? schemes[0]?.id ?? '',

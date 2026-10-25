@@ -508,6 +508,12 @@ function ConfigTab(props: TabProps & { scope: TokenCostSettingsScope }) {
           <span className={css.statusLabel}>{t('config.currency')}</span>
           <span className={css.statusValue}>{currency === 'cny' ? t('config.currencyCny') : t('config.currencyUsd')}</span>
         </div>
+        {status?.upgradeProtection !== undefined ? (
+          <div className={css.statusItem}>
+            <span className={css.statusLabel}>{t('upgrade.title')}</span>
+            <span className={css.statusValue}>{t(`upgrade.${status.upgradeProtection.state}`)}</span>
+          </div>
+        ) : null}
       </div>
       <div className={css.form}>
         <label className={css.checkRow}>

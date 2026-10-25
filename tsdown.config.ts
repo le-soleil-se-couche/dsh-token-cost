@@ -10,6 +10,7 @@
 import { clientBundle } from './build/tsdown.client.ts'
 
 export default clientBundle('@deepseek-ai/dsh-token-cost', ['src/index.ts'], {
+  lib: { deps: { alwaysBundle: ['fzstd', 'acorn'] } },
   libExternal: [
     '@deepseek-ai/dsh-client-connection',
     '@deepseek-ai/dsh-settings',

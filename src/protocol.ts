@@ -137,10 +137,18 @@ export interface LedgerStatus {
 }
 
 /** GET /api/dsh-token-cost/status */
+export interface UpgradeProtection {
+  state: 'armed' | 'checking' | 'blocked' | 'unavailable' | 'not-applicable'
+  version?: string
+  reason?: string
+}
+
+/** GET /api/dsh-token-cost/status */
 export interface StatusResponse {
   ok: boolean
   ledger: LedgerStatus
   pricing: PricingStatus
+  upgradeProtection?: UpgradeProtection
   error?: string
 }
 

@@ -1,6 +1,6 @@
 # dsh-token-cost
 
-版本 `0.4.1` 使用官方 DSH `0.2.1-rc.3` SDK、Cordis `4.0.5`、Schemastery `3.18.5`。宿主与 DSH peer 兼容范围统一为 `>=0.2.1-rc.2 <0.3.0-0`，修复桌面升级到下一 RC 后因精确版本锁定而拒载插件的问题。通信适配基于 [kslz 提交的 PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13)，并保留主分支的计费时间修复。
+版本 `0.5.0` 使用官方 DSH `0.2.1-rc.3` SDK、Cordis `4.0.5`、Schemastery `3.18.5`。macOS Desktop 的原生更新会在安装前自动检查费用插件依赖的接口；版本号和无关实现变化可自动通过，关键接口变化或检查失败则保留当前版本。通信适配基于 [kslz 提交的 PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13)，并保留主分支的计费时间修复。
 
 费用 API 通过经过认证、仅限 owner 的 Connection Fetch 注册表提供；桌面端使用宿主传输，Web 端保留反向代理挂载路径。会话详情使用 `/api/dsh-token-cost/session?id=...`，支持特殊字符 ID。自定义价格加载完成后才回答请求，避免启动时把已有价格误当作空配置。
 
@@ -13,6 +13,8 @@
 </p>
 
 DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计插件：单对话与整体汇总，内置 DeepSeek 官方计价方案（含 V4.1 Flash 降价与 V4 Pro 路由，东八区峰谷），也可为自己调用的其他模型填写单价。
+
+2026-10-25 更新：v0.5.0 新增 macOS 原生更新前的自动兼容检查，覆盖版本号、源码排版和无关功能变动；不兼容或无法完成检查时拦截安装。运行依赖随插件打包，配置页显示保护状态。当天的 v0.4.1 修复 DSH 升级到 `0.2.1-rc.3` 后费用插件因精确 RC 版本限制而停止加载的问题。宿主与 DSH peer 兼容范围统一为 `>=0.2.1-rc.2 <0.3.0-0`，开发 SDK 固定到 `0.2.1-rc.3`；新增官方兼容检查回归测试，并补充本地安装依赖、锁文件和实际链接保持一致的要求。
 
 2026-10-08 更新：v0.3.0 适配 DeepSeek Harness `0.2.0-rc.2`。费用直接挂载到官方输入框底部插槽，修复新版界面不显示费用的问题；与相邻速度、缓存指标保持相同字体、字号和颜色，仅用虚线下划线提示可点击查看明细。同步新版设置接口（配置保存后即时生效）、session format v4 读取和 ledger v6 缓存重建。已在 macOS 桌面端核验费用显示、明细打开和会话切换。
 
@@ -56,7 +58,11 @@ Token 字段遵循 Harness 约定：`inputTokens` = 缓存未命中部分，`cac
 
 ### 支持版本与日志协议边界
 
-编译与自动测试依赖固定为官方 npm `0.2.1-rc.3`；`engines.dsh` 与 DSH peers 使用 `>=0.2.1-rc.2 <0.3.0-0`。DSH 的官方兼容检查会计入预发布版本，因此同一 `0.2.x` 系列的后续 RC 不会仅因版本号变化被拒载；`0.3.0` 的预发布版及之后版本需要重新核验。版本范围表达支持策略，未来宿主的接口变化仍需实际验证。宿主配置由原生 Config 生命周期管理；浏览器使用 `configForms` / `ConfigForm` 和 `settings.plugins.tab` 设置入口。构建不需要 DSH 源码 checkout、旧 `dsh-client-runtime` 或本地伪造声明。
+编译与自动测试依赖固定为官方 npm `0.2.1-rc.3`。`engines.dsh` 与 DSH peers 的加载范围为 `>=0.2.1-rc.2 <1.0.0-0`，使插件无需为每一个 `0.3.x` 等版本重新发布精确版本声明；加载范围不代表所有未来版本都已验收。macOS 原生更新另有安装前检查：读取官方已下载 ZIP，核对校验值和费用相关代码、日志版本、插件加载器及原生更新协议；已覆盖的变化自动放行，无法识别或关键实现变化则返回安装错误，当前应用继续运行。检查只读候选代码，不执行候选代码、不修改官方应用、不改计价规则和历史数据。
+
+当前预案自动处理纯版本号变化、注释/空白/引号排版变化，以及检查范围外的新增功能。关键费用逻辑或接口实现发生变化时，需要先补充适配与验证。已验证当前 `0.2.1-rc.3` 官方包，并用合成 `0.3.0` 场景验证放行/拒绝；真实未来版本仍须通过实际候选包检查。
+
+保护范围为已启用费用插件的 macOS Desktop「检查更新 → 下载 → 安装」。在费用插件配置页可查看「宿主升级保护」状态；出现“此宿主的更新入口暂不受保护”时不应把该入口当作已受保护。手动替换应用、其他更新器、停用/卸载费用插件、Web 和其他操作系统不经过此门禁。检查超时会先拦截安装，稍后重试可复用已完成的检查结果。
 
 v2 日志读取依据 DSH `0.1.3-alpha.1` 的固定源码快照 [`d347e70390`](https://github.com/deepseek-ai/deepseek-harness/commit/d347e703908d0406b7a7ef80e3a0e594d86b2215)：session format v2 将每次 Assistant settlement 写为携带嵌入 stream 的 `assistant/message` 或 `assistant/attempt`，当前 generation 使用 `session.v2.jsonl(.zstd)`；迁移留下的 v0/v1 文件不是额外调用。`0.1.3-alpha.1` 宿主的完整安装与运行尚未验收；其版本不在本包声明的 peer 支持范围中。
 
@@ -66,7 +72,7 @@ v3 口径核验固定在官方 `dsh-v0.1.5-rc.2`（[`fb2c4b9`](https://github.co
 
 ## 安装
 
-宿主范围：DSH `>=0.2.1-rc.2 <0.3.0-0`，当前 SDK 验证版本为 `0.2.1-rc.3`；本地构建要求 Node.js `>=22.22.1`、pnpm `9.15.9`。旧版 DSH 请使用对应的旧插件版本。
+宿主加载范围：DSH `>=0.2.1-rc.2 <1.0.0-0`，当前 SDK 验证版本为 `0.2.1-rc.3`；本地构建要求 Node.js `>=22.22.1`、pnpm `9.15.9`。旧版 DSH 请使用对应的旧插件版本。
 
 从本仓库源码构建安装包：
 
@@ -75,19 +81,19 @@ pnpm install --ignore-scripts --frozen-lockfile
 pnpm pack
 ```
 
-`pnpm pack` 会执行本包的 `prepare` 构建步骤，生成 `deepseek-ai-dsh-token-cost-0.4.1.tgz`。官方 Desktop 在「插件 → 添加插件」中选择该本地安装包，然后在运行中的会话和后台任务结束后，正常退出并重新打开应用。Desktop profile 由应用管理，不使用 Web CLI 命令修改它。
+`pnpm pack` 会执行本包的 `prepare` 构建步骤，生成 `deepseek-ai-dsh-token-cost-0.5.0.tgz`。官方 Desktop 在「插件 → 添加插件」中选择该本地安装包，然后在运行中的会话和后台任务结束后，正常退出并重新打开应用。Desktop profile 由应用管理，不使用 Web CLI 命令修改它。
 
 Web profile 使用：
 
 ```sh
-dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.4.1.tgz
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.0.tgz
 ```
 
 重启 `dsh web` 后，输入框下方显示会话费用，点击可查看明细；设置中的「Token 费用统计」提供整体汇总。历史日志在首次查询时回填。
 
 已有安装应更新同一个包，避免同时加载两个副本。本版本保留包名、设置命名空间、账本目录及自定义价格文件。使用本地 `link:` 安装时，profile 的 `package.json`、`pnpm-lock.yaml` 与实际插件链接必须指向同一份构建；只替换 `node_modules` 会在下一次安装其他插件时被旧依赖声明还原。
 
-升级后入口缺失时，先在「插件」中打开本包，核对版本与异常原因。若出现 `engines.dsh 0.2.1-rc.2` 的精确版本要求，仍在加载 `0.4.0` 的旧构建，应更新到 `0.4.1` 并按应用提示重载。此类兼容检查会在插件执行前拒绝加载；无需删除账本、自定义价格或会话数据。
+升级后入口缺失时，先在「插件」中打开本包，核对版本与异常原因。若出现 `engines.dsh 0.2.1-rc.2` 的精确版本要求，仍在加载 `0.4.0` 的旧构建，应更新到 `0.5.0` 并按应用提示重载。此类兼容检查会在插件执行前拒绝加载；无需删除账本、自定义价格或会话数据。
 
 统计费用是按日志和配置单价计算的估算值，不替代服务商账单。自动测试覆盖真实 SDK 的 Desktop carrier、HTTP 认证、非 owner 拒绝、价格持久化、特殊字符会话 ID、卸载重载，以及新增 usage 的汇总和刷新；测试使用合成记录，不发布真实会话日志。
 

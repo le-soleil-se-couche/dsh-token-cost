@@ -18,6 +18,7 @@ import { CustomPriceStore } from './price-store.ts'
 import { PRICE_SCHEMES, parseCustomPrices, withCustomPrices } from './pricing.ts'
 import type { ModelPrice, PriceScheme } from './protocol.ts'
 import { makeRoutes } from './routes.ts'
+import { installDesktopUpgradeGuard } from './upgrade/desktop.ts'
 
 /** Stable cordis plugin name. */
 export const name = 'token-cost'
@@ -69,6 +70,8 @@ function resolveDshHome(): string {
  * @param config - resolved plugin config (schema defaults applied by the loader).
  */
 export function apply(ctx: Context, config: Config = Config({})): void {
+  const upgradeGuard = installDesktopUpgradeGuard()
+  ctx.effect(() => () => upgradeGuard.dispose(), 'dsh-token-cost: desktop upgrade protection')
   const home = resolveDshHome()
   const storageDir = join(home, 'storages', 'dsh-token-cost')
   const ledger = new SessionLedger(
@@ -102,7 +105,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     const schemes = (): PriceScheme[] => withCustomPrices(PRICE_SCHEMES, customPrices())
     disposeRoutes = ctx.effect(
       () => {
-        const routes = makeRoutes({ ledger, pricing, schemes, customPrices, priceStore })
+        const routes = makeRoutes({ ledger, pricing, schemes, customPrices, priceStore,
+          upgradeProtection: () => upgradeGuard.status() })
         const disposers = routes.map((route) => ctx.connection.fetch.register({
           ...route,
           async fetch(request) {

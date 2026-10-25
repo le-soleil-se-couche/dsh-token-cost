@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      fzstd:
-        specifier: ^0.1.1
-        version: 0.1.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.5
@@ -81,6 +77,12 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.7
         version: 18.3.7(@types/react@18.3.31)
+      acorn:
+        specifier: 8.15.0
+        version: 8.15.0
+      fzstd:
+        specifier: ^0.1.1
+        version: 0.1.1
       jsdom:
         specifier: 29.1.1
         version: 29.1.1
@@ -669,6 +671,11 @@ packages:
 
   '@vitest/utils@4.1.12':
     resolution: {integrity: sha512-Q3awXrwOfEV+qc3WmO5ONyE0yO7Q1gQ9/oyHxGLZ/pl7N3NO/ZztqQwKLuwMkV+CA1JYSIeO3gkHnRDIo4AVaA==}
+
+  acorn@8.15.0:
+    resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
 
   ajv@8.20.0:
     resolution: {integrity: sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==}
@@ -1902,6 +1909,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.12
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
+
+  acorn@8.15.0: {}
 
   ajv@8.20.0:
     dependencies:
