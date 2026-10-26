@@ -1,6 +1,6 @@
 /** Registered compatibility plan for the native Desktop update handshake and fee APIs. */
 import { createHash } from 'node:crypto'
-import { tokenizer } from 'acorn'
+import { parse, tokenizer } from 'acorn'
 
 /** Archive reader shared by real packages and synthetic update fixtures. */
 export interface PackageReader { text(path: string): Promise<string> }
@@ -42,9 +42,39 @@ export function sourceBlock(source: string, anchor: string): string {
   let depth = 0
   for (let i = opening; i < tokens.length; i++) {
     if (tokens[i] === '{' || tokens[i] === '${') depth++
-    if (tokens[i] === '}' && --depth === 0) return JSON.stringify(tokens.slice(start, i + 1))
+    if (tokens[i] === '}' && --depth === 0) {
+      const positions = Array.from(tokenizer(source, { ecmaVersion: 'latest', sourceType: 'module' }))
+      const begin = positions[opening]!.start
+      const end = positions[i]!.end
+      const tree = parseSource(source)
+      let selected: unknown
+      const visit = (value: unknown): void => {
+        if (!value || typeof value !== 'object') return
+        const node = value as Record<string, unknown>
+        if (node.start === begin && node.end === end) { selected = node; return }
+        for (const child of Object.values(node)) {
+          if (Array.isArray(child)) child.forEach(visit)
+          else visit(child)
+        }
+      }
+      visit(tree)
+      if (!selected) throw new Error('SOURCE_SYNTAX_BLOCK')
+      return JSON.stringify(tokens.slice(start, i + 1)) + canonicalSyntax(selected)
+    }
   }
   throw new Error('SOURCE_BLOCK')
+}
+
+// Syntax, unlike lexical tokens, retains automatic semicolon insertion semantics.
+function parseSource(source: string) {
+  return parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowReturnOutsideFunction: true })
+}
+
+function canonicalSyntax(tree: unknown): string {
+  return JSON.stringify(tree, (key, value) => {
+    if (['start', 'end', 'loc', 'range', 'raw'].includes(key)) return undefined
+    return typeof value === 'bigint' ? { bigint: value.toString() } : value
+  })
 }
 
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
@@ -108,14 +138,19 @@ export async function captureUpgradeContract(reader: PackageReader): Promise<Upg
   const start = sequenceIndex(host, 'if (message.type !== "update-tasks"')
   const end = sequenceIndex(host, 'process.once("disconnect"', start)
   if (start < 0 || end < start || sequenceIndex(host.slice(start, end), 'control.updateTasks(message.action)') < 0) throw new Error('NATIVE_CONTROL')
-  const fingerprints: Record<string, string> = { 'native-control': digest(JSON.stringify(host.slice(start, end))) }
+  const fingerprints: Record<string, string> = { 'native-control': digest(canonicalSyntax(parseSource(await text(`${PREFIX}dsh-desktop-host/lib/index.js`)))) }
   for (const [name, path, anchor] of BLOCKS) {
     try { fingerprints[name] = digest(sourceBlock(await text(path), anchor)) }
     catch { throw new Error(`SOURCE_INTERFACE:${name}`) }
   }
+  // Registration delegates to private methods and helpers. Conservatively bind the
+  // whole renderer implementation so changes outside the public wrapper cannot pass.
+  fingerprints['slots-implementation'] = digest(canonicalSyntax(parseSource(
+    await text(`${PREFIX}dsh-client-ui-renderer/lib/client.js`),
+  )))
   // The IPC request has no version field: bind it to the known native cache protocol.
   // A future updater that changes this binding must not use an old cached approval.
-  for (const [name, path] of UPDATE_BINDING_FILES) fingerprints[name] = digest(JSON.stringify(sourceTokens(await text(path))))
+  for (const [name, path] of UPDATE_BINDING_FILES) fingerprints[name] = digest(canonicalSyntax(parseSource(await text(path))))
   return { version: manifest.version, fingerprints }
 }
 

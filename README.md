@@ -1,6 +1,6 @@
 # dsh-token-cost
 
-版本 `0.5.0` 使用官方 DSH `0.2.1-rc.3` SDK、Cordis `4.0.5`、Schemastery `3.18.5`。macOS Desktop 的原生更新会在安装前自动检查费用插件依赖的接口；版本号和无关实现变化可自动通过，关键接口变化或检查失败则保留当前版本。通信适配基于 [kslz 提交的 PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13)，并保留主分支的计费时间修复。
+版本 `0.5.1` 使用官方 DSH `0.2.1-rc.3` SDK、Cordis `4.0.5`、Schemastery `3.18.5`。macOS Desktop 的原生更新会在安装前自动检查费用插件依赖的接口；版本号和无关实现变化可自动通过，关键接口变化或检查失败则保留当前版本。通信适配基于 [kslz 提交的 PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13)，并保留主分支的计费时间修复。
 
 费用 API 通过经过认证、仅限 owner 的 Connection Fetch 注册表提供；桌面端使用宿主传输，Web 端保留反向代理挂载路径。会话详情使用 `/api/dsh-token-cost/session?id=...`，支持特殊字符 ID。自定义价格加载完成后才回答请求，避免启动时把已有价格误当作空配置。
 
@@ -13,6 +13,8 @@
 </p>
 
 DeepSeek Harness（DSH）Web GUI 的 Token 用量 / 缓存命中 / 费用统计插件：单对话与整体汇总，内置 DeepSeek 官方计价方案（含 V4.1 Flash 降价与 V4 Pro 路由，东八区峰谷），也可为自己调用的其他模型填写单价。
+
+2026-10-26 更新：v0.5.1 修复升级保护的两处漏检：完整检查槽位渲染模块，覆盖内部注册方法及其依赖；关键代码块使用语法树保留 JavaScript 自动分号插入语义，避免把改变行为的换行当成排版变化。新增真实 SDK 内部注册方法及换行反例回归测试。槽位模块的实现变化会保守拦截，需复核后适配。
 
 2026-10-25 更新：v0.5.0 新增 macOS 原生更新前的自动兼容检查，覆盖版本号、源码排版和无关功能变动；不兼容或无法完成检查时拦截安装。运行依赖随插件打包，配置页显示保护状态。当天的 v0.4.1 修复 DSH 升级到 `0.2.1-rc.3` 后费用插件因精确 RC 版本限制而停止加载的问题。宿主与 DSH peer 兼容范围统一为 `>=0.2.1-rc.2 <0.3.0-0`，开发 SDK 固定到 `0.2.1-rc.3`；新增官方兼容检查回归测试，并补充本地安装依赖、锁文件和实际链接保持一致的要求。
 
@@ -81,19 +83,19 @@ pnpm install --ignore-scripts --frozen-lockfile
 pnpm pack
 ```
 
-`pnpm pack` 会执行本包的 `prepare` 构建步骤，生成 `deepseek-ai-dsh-token-cost-0.5.0.tgz`。官方 Desktop 在「插件 → 添加插件」中选择该本地安装包，然后在运行中的会话和后台任务结束后，正常退出并重新打开应用。Desktop profile 由应用管理，不使用 Web CLI 命令修改它。
+`pnpm pack` 会执行本包的 `prepare` 构建步骤，生成 `deepseek-ai-dsh-token-cost-0.5.1.tgz`。官方 Desktop 在「插件 → 添加插件」中选择该本地安装包，然后在运行中的会话和后台任务结束后，正常退出并重新打开应用。Desktop profile 由应用管理，不使用 Web CLI 命令修改它。
 
 Web profile 使用：
 
 ```sh
-dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.0.tgz
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.1.tgz
 ```
 
 重启 `dsh web` 后，输入框下方显示会话费用，点击可查看明细；设置中的「Token 费用统计」提供整体汇总。历史日志在首次查询时回填。
 
 已有安装应更新同一个包，避免同时加载两个副本。本版本保留包名、设置命名空间、账本目录及自定义价格文件。使用本地 `link:` 安装时，profile 的 `package.json`、`pnpm-lock.yaml` 与实际插件链接必须指向同一份构建；只替换 `node_modules` 会在下一次安装其他插件时被旧依赖声明还原。
 
-升级后入口缺失时，先在「插件」中打开本包，核对版本与异常原因。若出现 `engines.dsh 0.2.1-rc.2` 的精确版本要求，仍在加载 `0.4.0` 的旧构建，应更新到 `0.5.0` 并按应用提示重载。此类兼容检查会在插件执行前拒绝加载；无需删除账本、自定义价格或会话数据。
+升级后入口缺失时，先在「插件」中打开本包，核对版本与异常原因。若出现 `engines.dsh 0.2.1-rc.2` 的精确版本要求，仍在加载 `0.4.0` 的旧构建，应更新到 `0.5.1` 并按应用提示重载。此类兼容检查会在插件执行前拒绝加载；无需删除账本、自定义价格或会话数据。
 
 统计费用是按日志和配置单价计算的估算值，不替代服务商账单。自动测试覆盖真实 SDK 的 Desktop carrier、HTTP 认证、非 owner 拒绝、价格持久化、特殊字符会话 ID、卸载重载，以及新增 usage 的汇总和刷新；测试使用合成记录，不发布真实会话日志。
 
