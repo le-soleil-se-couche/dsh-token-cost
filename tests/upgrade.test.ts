@@ -128,6 +128,15 @@ describe('registered upgrade plans', () => {
     expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
   })
 
+  it('preserves tagged-template raw text in module fingerprints', async () => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    const path = 'node_modules/electron-updater/out/AppUpdater.js'
+    current.files[path] = 'const value = String.raw`\\u0061`;'
+    next.files[path] = 'const value = String.raw`a`;'
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
+  })
+
   it.each(['format', 'slot', 'bridge', 'framework', 'major'])('rejects an unrecognized %s change', async kind => {
     const next = fixture(kind === 'major' ? '1.0.0' : '0.3.0')
     if (kind === 'format') next.files[`${PREFIX}dsh-session/lib/index.js`] = 'const SESSION_FORMAT_VERSION = 5;'

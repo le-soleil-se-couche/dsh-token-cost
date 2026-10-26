@@ -71,8 +71,9 @@ function parseSource(source: string) {
 }
 
 function canonicalSyntax(tree: unknown): string {
-  return JSON.stringify(tree, (key, value) => {
-    if (['start', 'end', 'loc', 'range', 'raw'].includes(key)) return undefined
+  return JSON.stringify(tree, function (key, value) {
+    if (['start', 'end', 'loc', 'range'].includes(key)) return undefined
+    if (key === 'raw' && this?.type === 'Literal') return undefined
     return typeof value === 'bigint' ? { bigint: value.toString() } : value
   })
 }
