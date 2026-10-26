@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -80,6 +80,61 @@ describe('registered upgrade plans', () => {
     expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(formatted))).toEqual([])
     formatted.files[`${PREFIX}dsh-client-connection/lib/index.js`] = formatted.files[`${PREFIX}dsh-client-connection/lib/index.js`]!.replace('owner: true', 'owner: false')
     expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(formatted))).toEqual(['fetch-owner'])
+  })
+
+  it.each(['_register', '_registerFactory'])('rejects a broken real renderer %s implementation', async method => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    const path = `${PREFIX}dsh-client-ui-renderer/lib/client.js`
+    const renderer = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/client.js', import.meta.url), 'utf8')
+    const signature = `${method}(options, component) {`
+    expect(renderer).toContain(signature)
+    current.files[path] = renderer
+    next.files[path] = renderer.replace(signature, `${signature} throw new Error('incompatible');`)
+    expect(sourceBlock(current.files[path], 'SlotRegistry.prototype.register = function register(rawOptions, component)'))
+      .toBe(sourceBlock(next.files[path], 'SlotRegistry.prototype.register = function register(rawOptions, component)'))
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
+      .toContain('slots-implementation')
+  })
+
+  it.each(['\n', '\r\n', '/* newline\n */'])('rejects return ASI introduced by %j', async newline => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    const path = `${PREFIX}dsh-client-ui-renderer/lib/client.js`
+    next.files[path] = next.files[path]!.replace('return callback();', `return${newline}callback();`)
+    const callback = vi.fn()
+    new Function('callback', `return${newline}callback();`)(callback)
+    expect(callback).not.toHaveBeenCalled()
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
+      .toContain('slots-wait')
+  })
+
+  it('preserves ASI behavior in other checked blocks and rejects invalid syntax', async () => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    const path = `${PREFIX}dsh-client-connection/lib/index.js`
+    next.files[path] = next.files[path]!.replace('return owner.effect', 'return\nowner.effect')
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
+      .toContain('fetch-register')
+    next.files[path] = next.files[path]!.replace('return\nowner.effect', 'throw\nowner.effect')
+    await expect(captureUpgradeContract(next)).rejects.toThrow()
+  })
+
+  it.each(['node_modules/electron-updater/out/AppUpdater.js', `${PREFIX}dsh-desktop-host/lib/index.js`])('preserves ASI in full-module fingerprints: %s', async path => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    current.files[path] += '\nfunction checked() { return callback(); }'
+    next.files[path] += '\nfunction checked() { return\ncallback(); }'
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
+  })
+
+  it('preserves tagged-template raw text in module fingerprints', async () => {
+    const current = fixture()
+    const next = fixture('0.3.0')
+    const path = 'node_modules/electron-updater/out/AppUpdater.js'
+    current.files[path] = 'const value = String.raw`\\u0061`;'
+    next.files[path] = 'const value = String.raw`a`;'
+    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
   })
 
   it.each(['format', 'slot', 'bridge', 'framework', 'major'])('rejects an unrecognized %s change', async kind => {
