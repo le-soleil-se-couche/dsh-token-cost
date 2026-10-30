@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { captureUpgradeContract, compareUpgradeContracts, sourceBlock, sourceTokens } from '../src/upgrade/contracts.ts'
 import { guardDesktopIpc, isDesktopControlListener } from '../src/upgrade/desktop.ts'
 import { pendingUpdateInspector } from '../src/upgrade/candidate.ts'
-import { AsarArchive } from '../src/upgrade/asar.ts'
+import { AsarArchive, rawArchiveFs } from '../src/upgrade/asar.ts'
 
 const PREFIX = 'dsh/node_modules/@deepseek-ai/'
 function fixture(version = '0.2.1-rc.3') {
@@ -137,6 +137,31 @@ describe('registered upgrade plans', () => {
     expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
   })
 
+  it('accepts reviewed loader release metadata while retaining implementation checks', async () => {
+    const current = fixture()
+    const next = fixture('0.2.1-rc.5')
+    const path = `${PREFIX}dsh-client-modules/lib/index.js`
+    current.files[path] = `var ClientModuleRegistry = class extends Service {
+      constructor(ctx) { super(ctx, 'clientModules');
+        const { version } = createRequire(import.meta.url)('../package.json');
+        const commit = 'be72761'; this.release = { version, commit };
+      }
+    };`
+    next.files[path] = current.files[path].replace('be72761', 'd4db512')
+    const before = await captureUpgradeContract(current)
+    expect(compareUpgradeContracts(before, await captureUpgradeContract(next))).toEqual([])
+    for (const changed of [
+      next.files[path].replace("'clientModules'", "'broken'"),
+      next.files[path].replace('this.release =', 'throw new Error(); this.release ='),
+      next.files[path].replace('version, commit', 'version, commit, extra: true'),
+      next.files[path] + "\nconst commit = 'd4db512';",
+      next.files[path].replace('d4db512', 'not-a-build-id'),
+    ]) {
+      next.files[path] = changed
+      expect(compareUpgradeContracts(before, await captureUpgradeContract(next))).toContain('client-module-loader')
+    }
+  })
+
   it.each(['format', 'slot', 'bridge', 'framework', 'major'])('rejects an unrecognized %s change', async kind => {
     const next = fixture(kind === 'major' ? '1.0.0' : '0.3.0')
     if (kind === 'format') next.files[`${PREFIX}dsh-session/lib/index.js`] = 'const SESSION_FORMAT_VERSION = 5;'
@@ -253,5 +278,26 @@ describe('candidate input boundaries', () => {
     const path = join(dir, 'bad.asar')
     await writeFile(path, Buffer.alloc(16, 255))
     await expect(AsarArchive.open(path)).rejects.toThrow('ASAR_HEADER')
+  })
+})
+
+
+describe('physical ASAR access in the desktop runtime', () => {
+  it('uses original-fs for both identity and byte reads in Electron without global flags', async () => {
+    const physical = { lstat: vi.fn(), open: vi.fn() }
+    const load = vi.fn(() => ({ promises: physical }))
+    const before = (process as unknown as { noAsar?: boolean }).noAsar
+    const selected = rawArchiveFs('desktop-electron', load as unknown as Parameters<typeof rawArchiveFs>[1])
+    expect(load).toHaveBeenCalledWith('original-fs')
+    expect(selected.lstat).toBe(physical.lstat)
+    expect(selected.open).toBe(physical.open)
+    expect((process as unknown as { noAsar?: boolean }).noAsar).toBe(before)
+  })
+
+  it('keeps normal Node filesystem access and fails closed if Electron raw fs is unavailable', () => {
+    const load = vi.fn(() => { throw new Error('unavailable') })
+    expect(rawArchiveFs('', load).open).toBeTypeOf('function')
+    expect(load).not.toHaveBeenCalled()
+    expect(() => rawArchiveFs('desktop-electron', load)).toThrow('unavailable')
   })
 })

@@ -1,6 +1,8 @@
 # dsh-token-cost
 
-Version `0.5.1` uses the official DSH `0.2.1-rc.3` SDK, Cordis `4.0.5`, and Schemastery `3.18.5`. Native macOS Desktop updates now check the fee interfaces before installation: version-only and unrelated changes can proceed automatically, while changed critical interfaces or failed checks retain the current application. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+Version `0.5.3` uses the official DSH `0.2.1-rc.3` SDK, Cordis `4.0.5`, and Schemastery `3.18.5`. Native macOS Desktop updates now check the fee interfaces before installation: version-only and unrelated changes can proceed automatically, while changed critical interfaces or failed checks retain the current application. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+
+2026-10-30 update: v0.5.3 fixes blocked official `0.2.1-rc.5` updates. Only recognized loader build-commit metadata is normalized; implementation changes remain checked. In Electron, local `original-fs` access checks physical ASAR identity and reads the archive, while extraction uses a neutral temporary filename to avoid virtual-archive interception. Full slot, syntax, checksum and file-identity checks remain active; global `process.noAsar` is unchanged. Verified in the real Electron runtime and through the official rc.3 to rc.5 native update.
 
 2026-10-26 update: v0.5.1 fixes two upgrade-check gaps: the complete slot renderer module is checked, including private registration methods and their dependencies; syntax trees preserve JavaScript automatic semicolon insertion semantics in critical blocks. Regression tests cover real SDK registration implementations and behavior-changing line breaks. Renderer implementation changes are conservatively blocked until reviewed and adapted.
 
@@ -79,19 +81,19 @@ pnpm install --ignore-scripts --frozen-lockfile
 pnpm pack
 ```
 
-`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.5.1.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
+`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.5.3.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
 
 For Web:
 
 ```sh
-dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.1.tgz
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.3.tgz
 ```
 
 Restart `dsh web`. Session costs appear below the composer; click for details. The Token Cost settings tab provides aggregate statistics. Historical logs are backfilled on first query.
 
 Update the existing package rather than loading two copies. Package identity, settings namespace, ledger location and custom prices are preserved. With local `link:` installs, the profile's `package.json`, `pnpm-lock.yaml`, and installed plugin link must point to the same build; replacing only `node_modules` lets the next package operation restore the old dependency.
 
-If the entry disappears after an upgrade, open this package under Plugins and check its version and error. An exact `engines.dsh 0.2.1-rc.2` requirement identifies the old `0.4.0` build; update to `0.5.1` and reload as directed by the application. This compatibility check rejects the package before executing it. Keep the ledger, custom prices, and session data.
+If the entry disappears after an upgrade, open this package under Plugins and check its version and error. An exact `engines.dsh 0.2.1-rc.2` requirement identifies the old `0.4.0` build; update to `0.5.3` and reload as directed by the application. This compatibility check rejects the package before executing it. Keep the ledger, custom prices, and session data.
 
 Estimates use recorded usage and configured rates; they are not provider invoices. Automated coverage includes the real SDK Desktop carrier, HTTP authentication, non-owner rejection, price persistence, escaped session IDs, unload/reload, and refreshed totals after new usage. Tests use synthetic records and publish no real session logs.
 

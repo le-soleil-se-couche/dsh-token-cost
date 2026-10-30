@@ -78,6 +78,39 @@ function canonicalSyntax(tree: unknown): string {
   })
 }
 
+/** The loader embeds the release commit as cache/version metadata, not an API.
+ * Normalize only the reviewed constructor binding immediately stored in this.release.
+ * Every other node (including new uses of this binding) remains fingerprinted.
+ */
+function clientModuleSyntax(source: string): string {
+  const tree = parseSource(source)
+  for (const statement of tree.body) {
+    if (statement.type !== 'VariableDeclaration') continue
+    for (const declaration of statement.declarations) {
+      if (declaration.id.type !== 'Identifier' || declaration.id.name !== 'ClientModuleRegistry'
+        || declaration.init?.type !== 'ClassExpression'
+        || declaration.init.superClass?.type !== 'Identifier' || declaration.init.superClass.name !== 'Service') continue
+      for (const method of declaration.init.body.body) {
+        if (method.type !== 'MethodDefinition' || method.kind !== 'constructor') continue
+        const body = method.value.body!.body
+        for (let i = 0; i < body.length - 1; i++) {
+          const binding = body[i]!
+          const next = body[i + 1]!
+          if (binding.type !== 'VariableDeclaration' || binding.kind !== 'const' || binding.declarations.length !== 1) continue
+          const item = binding.declarations[0]!
+          if (item.id.type !== 'Identifier' || item.id.name !== 'commit' || item.init?.type !== 'Literal'
+            || typeof item.init.value !== 'string' || !/^[0-9a-f]{7,40}$/.test(item.init.value)) continue
+          // Exact syntax prevents unrelated fields or assignments from being exempted.
+          const expected = parseSource('this.release = { version, commit };').body[0]
+          if (canonicalSyntax(next) !== canonicalSyntax(expected)) continue
+          item.init.value = '<release-commit>'
+        }
+      }
+    }
+  }
+  return canonicalSyntax(tree)
+}
+
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
 
 function sequenceIndex(tokens: string[], fragment: string, from = 0): number {
@@ -151,7 +184,11 @@ export async function captureUpgradeContract(reader: PackageReader): Promise<Upg
   )))
   // The IPC request has no version field: bind it to the known native cache protocol.
   // A future updater that changes this binding must not use an old cached approval.
-  for (const [name, path] of UPDATE_BINDING_FILES) fingerprints[name] = digest(canonicalSyntax(parseSource(await text(path))))
+  for (const [name, path] of UPDATE_BINDING_FILES) {
+    const source = await text(path)
+    fingerprints[name] = digest(name === 'client-module-loader'
+      ? clientModuleSyntax(source) : canonicalSyntax(parseSource(source)))
+  }
   return { version: manifest.version, fingerprints }
 }
 

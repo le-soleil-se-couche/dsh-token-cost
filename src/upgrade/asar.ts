@@ -1,5 +1,17 @@
 /** Bounded read-only ASAR access. Candidate application code is never executed. */
-import { open, type FileHandle } from 'node:fs/promises'
+import * as fs from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+
+/** Electron virtualizes .asar paths as directories. Inspect physical archive bytes locally. */
+export function rawArchiveFs(
+  electron = process.versions.electron,
+  load: (name: string) => { promises: typeof fs } = createRequire(import.meta.url),
+): typeof fs {
+  return electron ? load('original-fs').promises : fs
+}
+
+const archiveFs = rawArchiveFs()
 
 interface Entry {
   files?: Record<string, Entry>
@@ -20,7 +32,7 @@ export class AsarArchive {
 
   /** Open a regular bounded archive and validate its index before reading members. */
   static async open(path: string): Promise<AsarArchive> {
-    const file = await open(path, 'r')
+    const file = await archiveFs.open(path, 'r')
     try {
       const stat = await file.stat()
       if (!stat.isFile() || stat.size > 512 * 1024 * 1024) throw new Error('ASAR_SIZE')
