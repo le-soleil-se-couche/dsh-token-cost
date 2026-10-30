@@ -1,6 +1,6 @@
 /** Inspect the native updater's completed ZIP without installing or executing it. */
 import { createReadStream, createWriteStream } from 'node:fs'
-import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -8,10 +8,11 @@ import { basename, join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { AsarArchive } from './asar.ts'
+import { AsarArchive, rawArchiveFs } from './asar.ts'
 import { captureUpgradeContract, compareUpgradeContracts } from './contracts.ts'
 
 const exec = promisify(execFile)
+const archiveFs = rawArchiveFs()
 
 /** A verdict contains public version/interface facts, never archive URLs or user data. */
 export interface UpgradeVerdict {
@@ -22,7 +23,7 @@ export interface UpgradeVerdict {
 }
 
 async function regular(path: string, max: number) {
-  const stat = await lstat(path)
+  const stat = await archiveFs.lstat(path)
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > max) throw new Error('UPDATE_FILE')
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
 }
@@ -87,7 +88,8 @@ export function pendingUpdateInspector(currentAsar: string, cacheDirectory: stri
       let current: AsarArchive | undefined
       let candidate: AsarArchive | undefined
       try {
-        const extracted = join(scratch, 'candidate.asar')
+        // A neutral filename prevents Electron from virtualizing the in-progress output.
+        const extracted = join(scratch, 'candidate.bin')
         await unpackAsar(archive, extracted)
         current = await AsarArchive.open(currentAsar)
         candidate = await AsarArchive.open(extracted)
