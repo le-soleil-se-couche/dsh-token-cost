@@ -263,4 +263,3 @@ export function extractBrowserCore(source: string): string {
     return unsupported()
   }
 }
-

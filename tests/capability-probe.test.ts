@@ -175,4 +175,3 @@ describe('candidate SDK behavior probe', () => {
     await expect(run()).resolves.toEqual([expected])
   })
 })
-
