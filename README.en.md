@@ -1,6 +1,8 @@
 # dsh-token-cost
 
-Version `0.5.3` uses the official DSH `0.2.1-rc.3` SDK, Cordis `4.0.5`, and Schemastery `3.18.5`. Native macOS Desktop updates now check the fee interfaces before installation: version-only and unrelated changes can proceed automatically, while changed critical interfaces or failed checks retain the current application. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+Version `0.6.0` uses the official DSH `0.2.1-rc.3` SDK, Cordis `4.0.5`, and Schemastery `3.18.5`. Native macOS Desktop updates now check the fee interfaces before installation: version-only and unrelated changes can proceed automatically, while changed critical interfaces or failed checks retain the current application. The transport adaptation builds on [kslz's PR #13](https://github.com/le-soleil-se-couche/dsh-token-cost/pull/13) and retains the usage timestamp fixes from the main branch.
+
+2026-11-06 update: v0.6.0 replaces source-identity checks with candidate SDK behavior checks. Compatible minor releases, build identifiers and equivalent implementations no longer need per-release fingerprints. Checks cover plugin admission, client delivery, connection access, live settings, slots and the actual native installation preparation. Failures report specific check identifiers.
 
 2026-10-30 update: v0.5.3 fixes blocked official `0.2.1-rc.5` updates. Only recognized loader build-commit metadata is normalized; implementation changes remain checked. In Electron, local `original-fs` access checks physical ASAR identity and reads the archive, while extraction uses a neutral temporary filename to avoid virtual-archive interception. Full slot, syntax, checksum and file-identity checks remain active; global `process.noAsar` is unchanged. Verified in the real Electron runtime and through the official rc.3 to rc.5 native update.
 
@@ -58,9 +60,11 @@ The upstream log remains the telemetry boundary: title generation, Web Search, i
 
 ### Supported SDK and log protocol boundary
 
-Build and automated test dependencies are pinned to official npm `0.2.1-rc.3`. The manifest admission range is `>=0.2.1-rc.2 <1.0.0-0`, so later `0.3.x` versions do not require a new exact-version declaration. Admission is not a claim that every future host has been validated. Native macOS updates also inspect the downloaded official ZIP before installation: checksum, fee implementations, session format, plugin loader, and native update protocol must match a recognized plan. Recognized changes proceed automatically; unknown or changed critical implementations return an installation error while the current app keeps running. Inspection does not execute candidate code, modify the official app, or change pricing and historical data.
+Development uses the pinned official `0.2.1-rc.3` SDK. The DSH load range is `>=0.2.1-rc.2 <1.0.0-0`; Cordis and Schemastery admit compatible updates within their tested major series. A load range is not proof for every future release.
 
-The current plan handles version-only changes, comments/whitespace/quote formatting, and new functionality outside the inspected interfaces. Changed fee implementations require an adapter review and validation. The official `0.2.1-rc.3` package and synthetic `0.3.0` acceptance/rejection cases have been checked; actual future releases must pass their own package inspection.
+Before a native macOS update, the plugin verifies the cached ZIP checksum and file identity, then exercises its required candidate SDK in a short-lived restricted subprocess using synthetic data. Checks cover official plugin admission, client discovery/delivery, owner access, route registration/disposal, live configuration, locale, actual host slot declarations, slot registration/cleanup and the real native preparation callback. The subprocess has no network, writes or child processes and restricts user-directory reads; it loads no user profile or conversation. Cache checksum verification does not replace the native installer's signature verification.
+
+Equivalent implementations and compatible minor updates can pass automatically. Failed API behavior, unsupported protocol/storage formats, damaged packages or failed checks still block installation with a specific diagnostic code. These are bounded interface contracts, not a guarantee for arbitrary future breaking releases; actual browser rendering is verified in the running app.
 
 Protection covers native macOS Desktop Check for updates > Download > Install while the fee plugin is enabled. Its settings page reports Host update protection; an unavailable status means the entry is not protected. Manual application replacement, other updaters, disabling/uninstalling this plugin, Web, and other operating systems bypass this gate. A timeout blocks installation first; retrying can reuse the completed check.
 
@@ -81,19 +85,19 @@ pnpm install --ignore-scripts --frozen-lockfile
 pnpm pack
 ```
 
-`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.5.3.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
+`pnpm pack` runs this package's `prepare` build and produces `deepseek-ai-dsh-token-cost-0.6.0.tgz`. In official Desktop, select the local archive under Plugins > Add plugin. Once active conversations and background jobs finish, quit and reopen the app. The application manages its Desktop profile; do not use the Web CLI to modify it.
 
 For Web:
 
 ```sh
-dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.5.3.tgz
+dsh plugin --profile web add /absolute/path/deepseek-ai-dsh-token-cost-0.6.0.tgz
 ```
 
 Restart `dsh web`. Session costs appear below the composer; click for details. The Token Cost settings tab provides aggregate statistics. Historical logs are backfilled on first query.
 
 Update the existing package rather than loading two copies. Package identity, settings namespace, ledger location and custom prices are preserved. With local `link:` installs, the profile's `package.json`, `pnpm-lock.yaml`, and installed plugin link must point to the same build; replacing only `node_modules` lets the next package operation restore the old dependency.
 
-If the entry disappears after an upgrade, open this package under Plugins and check its version and error. An exact `engines.dsh 0.2.1-rc.2` requirement identifies the old `0.4.0` build; update to `0.5.3` and reload as directed by the application. This compatibility check rejects the package before executing it. Keep the ledger, custom prices, and session data.
+If the entry disappears after an upgrade, open this package under Plugins and check its version and error. An exact `engines.dsh 0.2.1-rc.2` requirement identifies the old `0.4.0` build; update to `0.6.0` and reload as directed by the application. This compatibility check rejects the package before executing it. Keep the ledger, custom prices, and session data.
 
 Estimates use recorded usage and configured rates; they are not provider invoices. Automated coverage includes the real SDK Desktop carrier, HTTP authentication, non-owner rejection, price persistence, escaped session IDs, unload/reload, and refreshed totals after new usage. Tests use synthetic records and publish no real session logs.
 

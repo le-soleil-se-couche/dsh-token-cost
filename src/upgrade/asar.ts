@@ -1,7 +1,8 @@
-/** Bounded read-only ASAR access. Candidate application code is never executed. */
+/** Bounded physical ASAR access. SDK probes execute separately under OS restrictions. */
 import * as fs from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 
 /** Electron virtualizes .asar paths as directories. Inspect physical archive bytes locally. */
 export function rawArchiveFs(
@@ -78,4 +79,58 @@ export class AsarArchive {
 
   /** Release the archive descriptor. */
   close(): Promise<void> { return this.file.close() }
+
+  /** Extract only packed JavaScript/JSON SDK files into a new, private probe directory. */
+  async extractSdk(destination: string): Promise<void> {
+    const root = this.tree.files?.dsh?.files?.node_modules
+    if (!root?.files) throw new Error('SDK_LAYOUT')
+    // Follow declared runtime dependencies of the seven exercised SDK packages.
+    // Unrelated editor/inspector assets are not part of a fee compatibility test.
+    const pending = ['@deepseek-ai/cordis', '@deepseek-ai/schemastery', '@deepseek-ai/cordis-plugin-loader',
+      '@deepseek-ai/dsh-client-connection', '@deepseek-ai/dsh-settings',
+      '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-settings',
+      '@deepseek-ai/dsh-client-modules', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-app-boot']
+    const packages = new Map<string, Entry>()
+    const visited = new Set<string>()
+    while (pending.length) {
+      const name = pending.pop()!
+      if (visited.has(name)) continue
+      visited.add(name)
+      if (!/^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/.test(name) || visited.size > 256) throw new Error('SDK_LAYOUT')
+      let entry: Entry | undefined = root
+      for (const part of name.split('/')) entry = entry?.files?.[part]
+      if (!entry?.files) throw new Error('SDK_LAYOUT')
+      // Native sidecars are not copied into the probe. If an exercised API actually needs one,
+      // its import/behavior fails closed instead of borrowing an installed host dependency.
+      if (entry.files['package.json']?.unpacked || entry.files['package.json']?.link) continue
+      const manifest = JSON.parse(await this.text(`dsh/node_modules/${name}/package.json`))
+      packages.set(name, entry)
+      pending.push(...Object.keys(manifest.dependencies ?? {}))
+      // Peers supplied by the host are real runtime imports too. Browser platform seeds have
+      // no Node package and are exercised through their extracted browser factories instead.
+      for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
+        let available: Entry | undefined = root
+        for (const part of peer.split('/')) available = available?.files?.[part]
+        if (available?.files) pending.push(peer)
+      }
+    }
+    let count = 0, bytes = 0
+    const visit = async (entry: Entry, relative: string): Promise<void> => {
+      for (const [name, child] of Object.entries(entry.files ?? {})) {
+        if (!name || name === '.' || name === '..' || /[\\/\0]/.test(name)) throw new Error('ASAR_MEMBER_PATH')
+        const path = relative ? `${relative}/${name}` : name
+        if (child.files) { await visit(child, path); continue }
+        // Native and linked entries are never executed by the probe. A required missing module fails it.
+        if (child.link !== undefined || child.unpacked || !/\.(?:[cm]?js|json)$/.test(name)) continue
+        if (++count > 25_000 || !Number.isSafeInteger(child.size) || child.size! < 0
+          || (bytes += child.size!) > 256 * 1024 * 1024) throw new Error('SDK_LIMIT')
+        const source = await this.text(`dsh/node_modules/${path}`)
+        const target = join(destination, 'node_modules', path)
+        await fs.mkdir(dirname(target), { recursive: true, mode: 0o700 })
+        await fs.writeFile(target, source, { flag: 'wx', mode: 0o600 })
+      }
+    }
+    for (const [name, entry] of packages) await visit(entry, name)
+    if (count === 0) throw new Error('SDK_LAYOUT')
+  }
 }

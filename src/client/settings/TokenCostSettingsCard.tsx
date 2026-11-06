@@ -511,7 +511,10 @@ function ConfigTab(props: TabProps & { scope: TokenCostSettingsScope }) {
         {status?.upgradeProtection !== undefined ? (
           <div className={css.statusItem}>
             <span className={css.statusLabel}>{t('upgrade.title')}</span>
-            <span className={css.statusValue}>{t(`upgrade.${status.upgradeProtection.state}`)}</span>
+            <span className={css.statusValue}>{t(`upgrade.${status.upgradeProtection.state}`)}
+              {status.upgradeProtection.state === 'blocked' && status.upgradeProtection.detail
+                ? ` (${status.upgradeProtection.detail})` : ''}
+            </span>
           </div>
         ) : null}
       </div>
