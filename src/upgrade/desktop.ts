@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { UpgradeProtection } from '../protocol.ts'
 import { pendingUpdateInspector, type UpgradeVerdict } from './candidate.ts'
-import { sourceTokens } from './contracts.ts'
+import { isDesktopControlSource } from './ipc-contract.ts'
 
 type Listener = (...args: unknown[]) => void
 
@@ -24,10 +24,7 @@ export interface DesktopUpgradeGuard {
 
 /** Recognize only the inspected native update/quit control listener. */
 export function isDesktopControlListener(listener: Function): boolean {
-  const text = sourceTokens(Function.prototype.toString.call(listener)).join(' ')
-  return text.includes('message . type !== string:"update-tasks"')
-    && text.includes('control . updateTasks ( message . action )')
-    && text.includes('string:"quit-inspection"')
+  return isDesktopControlSource(Function.prototype.toString.call(listener))
 }
 
 /** Interpose one known listener; every unrelated message is delegated unchanged. */
@@ -61,9 +58,12 @@ export function guardDesktopIpc(ipc: DesktopIpc, inspect: () => Promise<UpgradeV
     }, 8_000)
     void Promise.resolve().then(inspect).then(verdict => {
       if (timedOut) return
-      state = { state: verdict.allowed ? 'armed' : 'blocked', version: verdict.version, reason: verdict.reason }
+      state = { state: verdict.allowed ? 'armed' : 'blocked', version: verdict.version, reason: verdict.reason,
+        detail: verdict.detail ?? verdict.changed?.join(', ') }
       if (alive && verdict.allowed) original.apply(ipc, args)
-      else refuse(requestId, verdict.reason === 'changed-interface' ? '候选版本改变了尚未验证的费用接口' : '候选版本未通过兼容检查')
+      else refuse(requestId, verdict.reason === 'changed-interface'
+        ? `费用接口行为验证未通过（${verdict.changed?.join(', ') ?? 'unknown'}）`
+        : `无法完成兼容验证（${verdict.detail ?? verdict.reason}）`)
     }).catch(() => {
       if (!timedOut) {
         state = { state: 'blocked', reason: 'check-failed' }

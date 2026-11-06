@@ -9,7 +9,9 @@ import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { AsarArchive, rawArchiveFs } from './asar.ts'
-import { captureUpgradeContract, compareUpgradeContracts } from './contracts.ts'
+import { captureUpgradeContract } from './contracts.ts'
+import { extractBrowserCore } from './browser-core.ts'
+import { runCapabilityProbe } from './probe-runner.ts'
 
 const exec = promisify(execFile)
 const archiveFs = rawArchiveFs()
@@ -20,6 +22,7 @@ export interface UpgradeVerdict {
   version?: string
   reason: 'compatible' | 'changed-interface' | 'unrecognized-package' | 'check-failed'
   changed?: string[]
+  detail?: string
 }
 
 async function regular(path: string, max: number) {
@@ -85,22 +88,22 @@ export function pendingUpdateInspector(currentAsar: string, cacheDirectory: stri
     let verdict = cached?.key === key ? cached.verdict : undefined
     if (verdict === undefined) {
       const scratch = await mkdtemp(join(tmpdir(), 'dsh-fee-upgrade-'))
-      let current: AsarArchive | undefined
       let candidate: AsarArchive | undefined
       try {
         // A neutral filename prevents Electron from virtualizing the in-progress output.
         const extracted = join(scratch, 'candidate.bin')
         await unpackAsar(archive, extracted)
-        current = await AsarArchive.open(currentAsar)
         candidate = await AsarArchive.open(extracted)
-        const [baseline, target] = await Promise.all([captureUpgradeContract(current), captureUpgradeContract(candidate)])
-        const changed = compareUpgradeContracts(baseline, target)
+        const target = await captureUpgradeContract(candidate)
+        const core = extractBrowserCore(target.frontend)
+        await candidate.extractSdk(scratch)
+        const changed = await runCapabilityProbe(scratch, core, target.native, target.slots, target.version)
         verdict = { allowed: changed.length === 0, version: target.version,
           reason: changed.length === 0 ? 'compatible' : 'changed-interface', changed }
-      } catch {
-        verdict = { allowed: false, reason: 'unrecognized-package' }
+      } catch (error) {
+        verdict = { allowed: false, reason: 'unrecognized-package', detail: checkFailure(error) }
       } finally {
-        await Promise.all([current?.close(), candidate?.close()])
+        await candidate?.close()
         await rm(scratch, { recursive: true, force: true })
       }
     }
@@ -109,5 +112,16 @@ export function pendingUpdateInspector(currentAsar: string, cacheDirectory: stri
       || !infoBytes.equals(await readFile(infoPath))) throw new Error('UPDATE_CHANGED')
     cached = { key, verdict }
     return verdict
-  })().catch((): UpgradeVerdict => ({ allowed: false, reason: 'check-failed' })).finally(() => { pending = undefined })
+  })().catch((error): UpgradeVerdict => ({ allowed: false, reason: 'check-failed', detail: checkFailure(error) })).finally(() => { pending = undefined })
+}
+
+/** Stable diagnostic codes only: never expose source text, filesystem paths or subprocess stderr. */
+function checkFailure(error: unknown): string {
+  const code = error instanceof Error ? error.message : ''
+  const known = new Set(['UPDATE_FILE', 'UPDATE_METADATA', 'UPDATE_CHECKSUM', 'UPDATE_CHANGED', 'UPDATE_ARCHIVE',
+    'UPDATE_ASAR_SIZE', 'UPDATE_EXTRACT', 'ASAR_SIZE', 'ASAR_HEADER', 'ASAR_INDEX', 'ASAR_MEMBER_PATH',
+    'ASAR_MEMBER_MISSING', 'ASAR_MEMBER', 'ASAR_MEMBER_BOUNDS', 'ASAR_MEMBER_SHORT', 'SDK_LAYOUT', 'SDK_LIMIT',
+    'HOST_SLOT', 'HOST_FAMILY', 'HOST_PROTOCOL', 'FRAMEWORK_FAMILY', 'SESSION_FORMAT', 'CLIENT_LAYOUT', 'NATIVE_PROTOCOL',
+    'BROWSER_CORE_SOURCE', 'PROBE_PLATFORM', 'PROBE_TIMEOUT', 'PROBE_UNAVAILABLE', 'PROBE_OUTPUT_LIMIT'])
+  return known.has(code) ? code : 'CHECK_FAILED'
 }

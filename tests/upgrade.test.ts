@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { captureUpgradeContract, compareUpgradeContracts, sourceBlock, sourceTokens } from '../src/upgrade/contracts.ts'
+import { captureUpgradeContract, requiredSlot } from '../src/upgrade/contracts.ts'
 import { guardDesktopIpc, isDesktopControlListener } from '../src/upgrade/desktop.ts'
 import { pendingUpdateInspector } from '../src/upgrade/candidate.ts'
 import { AsarArchive, rawArchiveFs } from '../src/upgrade/asar.ts'
@@ -16,14 +16,16 @@ function fixture(version = '0.2.1-rc.3') {
     [`${PREFIX}cordis/package.json`]: '{"version":"4.0.5"}',
     [`${PREFIX}schemastery/package.json`]: '{"version":"3.18.5"}',
     [`${PREFIX}dsh-session/lib/index.js`]: 'const SESSION_FORMAT_VERSION = 4;',
-    'lib/main.js': `class Updater {
+    'lib/main.js': `var DesktopUpdateCoordinator = class {
       async install(version) { if (await this.beforeRestart()) this.updater.quitAndInstall(); }
       async updateTasks(action) { return this.control({ type: "update-tasks", action }); }
-    }
+    };
     const active = await host.updateTasks("inspect");
     const stillActive = await host.updateTasks("lock");
-    this.updater.autoInstallOnAppQuit = false;`,
+    this.updater.autoInstallOnAppQuit = false;
+    new DesktopUpdateCoordinator(publish, async () => true);`,
     [`${PREFIX}dsh-desktop-host/lib/index.js`]: `process.on("message", message => {
+      if (message.type === "quit-inspection") return;
       if (message.type !== "update-tasks") return;
       control.updateTasks(message.action);
     }); process.once("disconnect", stop);`,
@@ -39,12 +41,14 @@ function fixture(version = '0.2.1-rc.3') {
       class ConfigForms { get(entryId) { return this.forms[entryId]; } }`,
     [`${PREFIX}dsh-settings/lib/index.js`]: 'var SettingsForms = class extends Service { update() { return true; } };',
     [`${PREFIX}dsh-client-locale/lib/client.js`]: 'class Locale { register(ns, localeOrDicts, dict) { return dict; } }',
-    [`${PREFIX}dsh-client-ui-conversation/lib/client.js`]: 'const slots = { "conversation.composer.dock": { kind: "list", scope: "session" } };',
-    [`${PREFIX}dsh-client-ui-settings-plugins/lib/client.js`]: 'const slots = { "settings.plugins.tab": { kind: "list", scope: "root" } };',
+    [`${PREFIX}dsh-client-ui-conversation/lib/client.js`]: 'ctx.slots.register({children: { "conversation.composer.dock": { kind: "list", scope: "session" } }}, Component); renderSlot("conversation.composer.dock", {});',
+    [`${PREFIX}dsh-client-ui-settings-plugins/lib/client.js`]: 'ctx.slots.register({children: { "settings.plugins.tab": { kind: "list", scope: "root" } }}, Component); renderSlot("settings.plugins.tab", {});',
     [`${PREFIX}dsh-app-boot/lib/index.js`]: `function satisfies(runtimeVersion, range) { return true; }
       function unmetRequirements(fields, runtimeVersion) { return {}; }
       function evaluatePluginCompatibility(manifest, exemptions = {}, runtimeVersion = getDshRuntimeVersion()) { return undefined; }`,
     [`${PREFIX}dsh-client-modules/lib/index.js`]: 'const clientFactoryProtocol = 1;',
+    [`${PREFIX}dsh-web-frontend/dist/index.html`]: '<script type="module" src="/assets/index-abc.js"></script>',
+    [`${PREFIX}dsh-web-frontend/dist/assets/index-abc.js`]: 'const frontend = true;',
     'node_modules/electron-updater/out/DownloadedUpdateHelper.js': 'const cacheProtocol = 1;',
     'node_modules/electron-updater/out/AppUpdater.js': 'const downloadProtocol = 1;',
     'node_modules/electron-updater/out/MacUpdater.js': 'const installProtocol = 1;',
@@ -61,124 +65,40 @@ afterEach(async () => {
   for (const path of temporary.splice(0)) await rm(path, { recursive: true, force: true })
 })
 
-describe('registered upgrade plans', () => {
-  it('accepts a 0.3 version-only update and unrelated implementation additions', async () => {
-    const current = fixture()
-    const next = fixture('0.3.0')
+describe('declarative prerequisites for behavior probes', () => {
+  it('accepts SDK minor updates and native implementation changes for behavioral verification', async () => {
+    const next = fixture('0.2.2-rc.1')
+    next.files[`${PREFIX}cordis/package.json`] = '{"version":"4.1.0"}'
+    next.files[`${PREFIX}schemastery/package.json`] = '{"version":"3.19.0"}'
     next.files['lib/main.js'] += '\nfunction unrelatedNewFeature() { return 42; }'
-    const [before, after] = await Promise.all([captureUpgradeContract(current), captureUpgradeContract(next)])
-    expect(after.version).toBe('0.3.0')
-    expect(compareUpgradeContracts(before, after)).toEqual([])
+    const result = await captureUpgradeContract(next)
+    expect(result.version).toBe('0.2.2-rc.1')
+    expect(result.native.coordinator).toContain('install(version)')
+    expect(result.frontend).toBe('const frontend = true;')
+    // No source hash grants approval: candidate.ts must still run the SDK/native behavior probes.
+    expect(result).not.toHaveProperty('fingerprints')
   })
 
-  it('ignores comment, quote and whitespace changes while preserving executable changes', async () => {
-    const current = fixture()
-    const formatted = fixture('0.3.1')
-    for (const [key, value] of Object.entries(formatted.files)) {
-      if (key.endsWith('.js')) formatted.files[key] = '/* harmless banner */\n' + value.replaceAll('"', "'").replaceAll(';', ';\n')
-    }
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(formatted))).toEqual([])
-    formatted.files[`${PREFIX}dsh-client-connection/lib/index.js`] = formatted.files[`${PREFIX}dsh-client-connection/lib/index.js`]!.replace('owner: true', 'owner: false')
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(formatted))).toEqual(['fetch-owner'])
-  })
-
-  it.each(['_register', '_registerFactory'])('rejects a broken real renderer %s implementation', async method => {
-    const current = fixture()
-    const next = fixture('0.3.0')
-    const path = `${PREFIX}dsh-client-ui-renderer/lib/client.js`
-    const renderer = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/client.js', import.meta.url), 'utf8')
-    const signature = `${method}(options, component) {`
-    expect(renderer).toContain(signature)
-    current.files[path] = renderer
-    next.files[path] = renderer.replace(signature, `${signature} throw new Error('incompatible');`)
-    expect(sourceBlock(current.files[path], 'SlotRegistry.prototype.register = function register(rawOptions, component)'))
-      .toBe(sourceBlock(next.files[path], 'SlotRegistry.prototype.register = function register(rawOptions, component)'))
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
-      .toContain('slots-implementation')
-  })
-
-  it.each(['\n', '\r\n', '/* newline\n */'])('rejects return ASI introduced by %j', async newline => {
-    const current = fixture()
-    const next = fixture('0.3.0')
-    const path = `${PREFIX}dsh-client-ui-renderer/lib/client.js`
-    next.files[path] = next.files[path]!.replace('return callback();', `return${newline}callback();`)
-    const callback = vi.fn()
-    new Function('callback', `return${newline}callback();`)(callback)
-    expect(callback).not.toHaveBeenCalled()
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
-      .toContain('slots-wait')
-  })
-
-  it('preserves ASI behavior in other checked blocks and rejects invalid syntax', async () => {
-    const current = fixture()
-    const next = fixture('0.3.0')
-    const path = `${PREFIX}dsh-client-connection/lib/index.js`
-    next.files[path] = next.files[path]!.replace('return owner.effect', 'return\nowner.effect')
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)))
-      .toContain('fetch-register')
-    next.files[path] = next.files[path]!.replace('return\nowner.effect', 'throw\nowner.effect')
-    await expect(captureUpgradeContract(next)).rejects.toThrow()
-  })
-
-  it.each(['node_modules/electron-updater/out/AppUpdater.js', `${PREFIX}dsh-desktop-host/lib/index.js`])('preserves ASI in full-module fingerprints: %s', async path => {
-    const current = fixture()
-    const next = fixture('0.3.0')
-    current.files[path] += '\nfunction checked() { return callback(); }'
-    next.files[path] += '\nfunction checked() { return\ncallback(); }'
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
-  })
-
-  it('preserves tagged-template raw text in module fingerprints', async () => {
-    const current = fixture()
-    const next = fixture('0.3.0')
-    const path = 'node_modules/electron-updater/out/AppUpdater.js'
-    current.files[path] = 'const value = String.raw`\\u0061`;'
-    next.files[path] = 'const value = String.raw`a`;'
-    expect(compareUpgradeContracts(await captureUpgradeContract(current), await captureUpgradeContract(next)).length).toBeGreaterThan(0)
-  })
-
-  it('accepts reviewed loader release metadata while retaining implementation checks', async () => {
-    const current = fixture()
-    const next = fixture('0.2.1-rc.5')
-    const path = `${PREFIX}dsh-client-modules/lib/index.js`
-    current.files[path] = `var ClientModuleRegistry = class extends Service {
-      constructor(ctx) { super(ctx, 'clientModules');
-        const { version } = createRequire(import.meta.url)('../package.json');
-        const commit = 'be72761'; this.release = { version, commit };
-      }
-    };`
-    next.files[path] = current.files[path].replace('be72761', 'd4db512')
-    const before = await captureUpgradeContract(current)
-    expect(compareUpgradeContracts(before, await captureUpgradeContract(next))).toEqual([])
-    for (const changed of [
-      next.files[path].replace("'clientModules'", "'broken'"),
-      next.files[path].replace('this.release =', 'throw new Error(); this.release ='),
-      next.files[path].replace('version, commit', 'version, commit, extra: true'),
-      next.files[path] + "\nconst commit = 'd4db512';",
-      next.files[path].replace('d4db512', 'not-a-build-id'),
-    ]) {
-      next.files[path] = changed
-      expect(compareUpgradeContracts(before, await captureUpgradeContract(next))).toContain('client-module-loader')
+  it('requires actual host slot registration and a consumer with matching shape', () => {
+    const good = 'ctx.slots.register({ children: { "conversation.composer.dock": {kind:"list",scope:"session"} } }, Component); renderSlot("conversation.composer.dock", {});'
+    expect(requiredSlot(good, 'conversation.composer.dock', 'session')).toEqual({ kind: 'list', scope: 'session' })
+    for (const bad of [good.replaceAll('conversation.composer.dock', 'renamed'), good.replace('kind:"list"', 'kind:"single"'),
+      good.replace('scope:"session"', 'scope:"root"'), good.split(';')[0]!, 'const unrelated = {"conversation.composer.dock": {kind:"list",scope:"session"}};']) {
+      expect(() => requiredSlot(bad, 'conversation.composer.dock', 'session')).toThrow('HOST_SLOT')
     }
   })
 
-  it.each(['format', 'slot', 'bridge', 'framework', 'major'])('rejects an unrecognized %s change', async kind => {
-    const next = fixture(kind === 'major' ? '1.0.0' : '0.3.0')
-    if (kind === 'format') next.files[`${PREFIX}dsh-session/lib/index.js`] = 'const SESSION_FORMAT_VERSION = 5;'
-    if (kind === 'slot') delete next.files[`${PREFIX}dsh-client-ui-conversation/lib/client.js`]
-    if (kind === 'bridge') next.files['lib/main.js'] = next.files['lib/main.js']!.replace('host.updateTasks("inspect")', 'host.startUpdate()')
-    if (kind === 'framework') next.files[`${PREFIX}cordis/package.json`] = '{"version":"5.0.0"}'
-    await expect(captureUpgradeContract(next)).rejects.toThrow()
-  })
-
-  it('keeps regular expressions and template braces intact when finding methods', () => {
-    const source = 'class Example { value() { return /[}]/.test("}") ? `a${ { x: 1 }.x }` : "no"; } other() {} }'
-    expect(sourceBlock(source, 'value()')).toContain('regexp:')
-    expect(sourceBlock(source, 'value()')).not.toContain('other')
-    expect(sourceTokens('x = "//not a comment"; /* comment */')).toContain('string:"//not a comment"')
-    expect(sourceTokens('return 1n')).not.toEqual(sourceTokens('return 1'))
-    expect(sourceTokens('this.#value')).not.toEqual(sourceTokens('this.value'))
-  })
+  it.each(['format', 'framework', 'major', 'protocol', 'client-layout', 'native-protocol'])(
+    'rejects unsupported prerequisite %s', async kind => {
+      const next = fixture(kind === 'major' ? '1.0.0' : '0.2.2-rc.1')
+      if (kind === 'format') next.files[`${PREFIX}dsh-session/lib/index.js`] = 'const SESSION_FORMAT_VERSION = 5;'
+      if (kind === 'framework') next.files[`${PREFIX}cordis/package.json`] = '{"version":"5.0.0"}'
+      if (kind === 'protocol') next.files['dsh/desktop-runtime.json'] = JSON.stringify({ schemaVersion: 1, release: { version: '0.2.2-rc.1', hostProtocolVersion: 5 } })
+      if (kind === 'client-layout') next.files[`${PREFIX}dsh-web-frontend/dist/index.html`] = '<script type="module" src="../../outside.js"></script>'
+      if (kind === 'native-protocol') next.files['lib/main.js'] = 'const unknown = true;'
+      await expect(captureUpgradeContract(next)).rejects.toThrow()
+    },
+  )
 })
 
 function transport() {
@@ -240,6 +160,27 @@ describe('native installation admission', () => {
     expect(ipc.send).toHaveBeenCalledTimes(1)
     expect(guard.status().reason).toBe('check-timeout')
     guard.dispose()
+  })
+
+  it('refuses lock if the fresh candidate recheck no longer passes', async () => {
+    const { ipc, control } = transport()
+    const inspect = vi.fn()
+      .mockResolvedValueOnce({ allowed: true, reason: 'compatible', version: '0.2.2-rc.1' })
+      .mockResolvedValueOnce({ allowed: false, reason: 'check-failed', detail: 'UPDATE_CHANGED' })
+    const guard = guardDesktopIpc(ipc, inspect)
+    ipc.emit('message', { type: 'update-tasks', requestId: 1, action: 'inspect' })
+    await vi.waitFor(() => expect(control.updateTasks).toHaveBeenCalledWith('inspect'))
+    ipc.emit('message', { type: 'update-tasks', requestId: 2, action: 'lock' })
+    await vi.waitFor(() => expect(guard.status().state).toBe('blocked'))
+    expect(control.updateTasks).not.toHaveBeenCalledWith('lock')
+    expect(ipc.send).toHaveBeenCalledWith(expect.objectContaining({ requestId: 2, error: expect.stringContaining('UPDATE_CHANGED') }))
+    guard.dispose()
+  })
+
+  it('recognizes equivalent listener argument names', () => {
+    const { original } = transport()
+    const renamed = new Function('control', 'send', `return (${original.toString().replaceAll('message', 'packet')})`)({}, () => {})
+    expect(isDesktopControlListener(renamed)).toBe(true)
   })
 
   it('preserves other listeners and reports unavailable for an unknown host', () => {

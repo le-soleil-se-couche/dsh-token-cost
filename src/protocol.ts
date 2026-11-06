@@ -141,6 +141,7 @@ export interface UpgradeProtection {
   state: 'armed' | 'checking' | 'blocked' | 'unavailable' | 'not-applicable'
   version?: string
   reason?: string
+  detail?: string
 }
 
 /** GET /api/dsh-token-cost/status */
